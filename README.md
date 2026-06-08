@@ -1,43 +1,43 @@
 # Input Kanban
 
-[中文](README.zh-CN.md) | English
+中文 | [English](README.en.md)
 
-Input Kanban is a local dashboard for orchestrating Codex work with `codex exec`. Install it from npm, run `input-kanban`, and manage planner, worker, and final judge runs from your browser.
+Input Kanban 是一个本地 Codex 编排看板。通过 npm 安装后运行 `input-kanban`，即可在浏览器里管理 planner、worker 和 final judge 的执行流程。
 
-## Install
+## 安装
 
 ```bash
 npm install -g input-kanban
 ```
 
-Verify the CLI:
+验证 CLI：
 
 ```bash
 input-kanban --help
 ```
 
-## Start
+## 启动
 
-Run from the repository you want Codex to work on:
+在你希望 Codex 执行任务的目标仓库目录中运行：
 
 ```bash
 cd /path/to/repo
 input-kanban
 ```
 
-Then open:
+然后打开：
 
 ```text
 http://127.0.0.1:8787
 ```
 
-Or provide the target repository explicitly:
+也可以显式指定目标仓库：
 
 ```bash
 input-kanban --repo /path/to/repo
 ```
 
-## Common Options
+## 常用参数
 
 ```bash
 input-kanban --port 8787
@@ -47,38 +47,39 @@ input-kanban --codex-bin codex
 input-kanban --open
 ```
 
-Defaults:
+默认值：
 
-- repo: current working directory
-- host: `127.0.0.1`
-- port: `8787`
-- runs directory: `~/.input-kanban/runs`
-- Codex binary: `codex`
+- 目标仓库：启动命令时的当前目录
+- host：`127.0.0.1`
+- port：`8787`
+- runs 目录：`~/.input-kanban/runs`
+- Codex 可执行文件：`codex`
 
-## What It Does
+## 它能做什么
 
-- Creates local task runs from user-provided task text.
-- Starts a read-only planner with `codex exec --json`.
-- Schedules workers by strict batch barriers and `batch.maxParallel`.
-- Tracks local process status, exit codes, logs, final messages, and artifacts.
-- Generates `judge_input.json` and runs one final judge after all batches complete.
-- Supports stopping runs, soft-archiving runs, and manually marking failed or unknown workers as completed.
-- Shows formatted Codex JSONL logs in the dashboard.
+- 根据用户输入的任务说明创建本地 run。
+- 使用 `codex exec --json` 启动只读 planner。
+- 按严格 batch barrier 和 `batch.maxParallel` 调度 worker。
+- 跟踪本地进程、退出码、日志、最终回复和 artifact。
+- 在最终验收前生成 `judge_input.json`，汇总所有 worker 结果。
+- 所有 batch 完成后运行一次 final judge。
+- 支持停止 run、软归档 run、手动标记 failed / unknown worker 为完成。
+- 在看板里格式化展示 Codex JSONL 执行日志。
 
-## Typical Workflow
+## 典型流程
 
-1. Start `input-kanban` in the target repository.
-2. Open the dashboard.
-3. Create a run with task text.
-4. Click `Plan` to generate batches and workers.
-5. Click `Dispatch` to run workers.
-6. Inspect logs, final messages, and artifacts.
-7. Click `Final Judge` after all batches complete.
-8. Stop or archive runs when needed.
+1. 在目标仓库中启动 `input-kanban`。
+2. 打开浏览器看板。
+3. 输入任务说明并创建 run。
+4. 点击 `拆分任务` 生成 batches 和 workers。
+5. 点击 `派发执行` 运行 workers。
+6. 查看日志、最终回复和 artifacts。
+7. 所有 batch 完成后点击 `汇总验收`。
+8. 必要时停止或归档 run。
 
-## Runtime Data
+## 运行数据
 
-Runtime data is stored under the configured runs directory:
+运行数据会保存到配置的 runs 目录：
 
 ```text
 runs/<runId>/
@@ -92,13 +93,13 @@ runs/<runId>/
     └── verdict.json
 ```
 
-For CLI usage, the default runs directory is:
+CLI 默认 runs 目录是：
 
 ```text
 ~/.input-kanban/runs
 ```
 
-## Development
+## 开发
 
 ```bash
 git clone https://github.com/zhang3xing1/Input-Kanban.git
@@ -107,20 +108,20 @@ npm install
 npm start
 ```
 
-For local CLI development:
+本地 CLI 开发：
 
 ```bash
 npm link
 input-kanban --help
 ```
 
-Run checks:
+检查：
 
 ```bash
 npm run check
 ```
 
-## More Documentation
+## 更多文档
 
-- [Project guide](PROJECT_GUIDE.md)
-- [Environment variables](ENVIRONMENT.md)
+- [项目实现说明](PROJECT_GUIDE.md)
+- [环境变量](ENVIRONMENT.md)
