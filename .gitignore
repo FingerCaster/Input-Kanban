@@ -1,0 +1,5 @@
+runs/
+.DS_Store
+node_modules/
+.env.local
+ENVIRONMENT.local.md

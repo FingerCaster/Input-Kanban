@@ -1,0 +1,40 @@
+{
+  "name": "input-kanban",
+  "version": "0.0.1",
+  "type": "module",
+  "bin": {
+    "input-kanban": "./bin/input-kanban.js"
+  },
+  "scripts": {
+    "start": "node bin/input-kanban.js",
+    "check": "node --check bin/input-kanban.js && node --check src/server.js && node --check src/orchestrator.js && node --check src/appServerClient.js && node --check src/utils.js"
+  },
+  "dependencies": {},
+  "description": "A local Codex orchestration kanban dashboard",
+  "files": [
+    "bin",
+    "src",
+    "public",
+    "README.md",
+    "PROJECT_GUIDE.md",
+    "ENVIRONMENT.md"
+  ],
+  "keywords": [
+    "codex",
+    "kanban",
+    "orchestration",
+    "cli",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zhang3xing1/Input-Kanban.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zhang3xing1/Input-Kanban/issues"
+  },
+  "homepage": "https://github.com/zhang3xing1/Input-Kanban#readme",
+  "engines": {
+    "node": ">=20"
+  }
+}

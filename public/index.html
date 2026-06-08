@@ -1,0 +1,492 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Codex 编排看板</title>
+  <style>
+    :root { --bg:#0b1220; --panel:#111827; --panel-2:#0f172a; --line:#334155; --line-strong:#64748b; --text:#e2e8f0; --muted:#94a3b8; --blue:#2563eb; --green:#166534; --red:#991b1b; --gray:#475569; --orange:#b45309; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
+    header { padding: 18px 24px; background: #0a1020; border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 rgba(255,255,255,.03); }
+    h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
+    h2 { margin: 0 0 12px; font-size: 24px; }
+    h3 { margin: 18px 0 8px; font-size: 15px; color: #cbd5e1; }
+    main { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 18px; padding: 18px; align-items: start; min-height: calc(100vh - 59px); }
+    main > div, section { min-width: 0; }
+    .sidebar { position: sticky; top: 18px; height: calc(100vh - 36px); }
+    .sidebar section { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
+    section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+    textarea, input { width: 100%; box-sizing: border-box; background: #020617; color: var(--text); border: 1px solid #475569; border-radius: 9px; padding: 9px 10px; outline: none; }
+    textarea:focus, input:focus { border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(37,99,235,.25); }
+    textarea { min-height: 240px; }
+    label { display: block; margin-top: 10px; color: #cbd5e1; font-weight: 700; }
+    button { background: var(--blue); color: white; border: 0; border-radius: 9px; padding: 8px 11px; margin: 4px 4px 4px 0; cursor: pointer; font-weight: 700; }
+    button:hover { filter: brightness(1.08); }
+    button.secondary { background: var(--gray); }
+    button.danger { background: #dc2626; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+    th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; }
+    th:nth-child(1), td:nth-child(1) { width: 34%; }
+    th:nth-child(2), td:nth-child(2) { width: 92px; white-space: nowrap; }
+    th:nth-child(3), td:nth-child(3) { width: 132px; }
+    th:nth-child(4), td:nth-child(4) { width: 64px; white-space: nowrap; }
+    th:nth-child(5), td:nth-child(5) { width: 70px; }
+    th:nth-child(6), td:nth-child(6) { width: 58px; }
+    th:nth-child(8), td:nth-child(8) { width: 66px; }
+    th:nth-child(9), td:nth-child(9) { width: 94px; }
+    th { color: #cbd5e1; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
+    tr:hover { background: #162033; cursor: pointer; }
+    .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: var(--gray); line-height: 1.3; }
+    .completed, .judged, .workers_completed, .planned, .batches_completed { background: var(--green); }
+    .running, .planning, .judging { background: var(--blue); }
+    .failed, .workers_failed, .plan_failed, .judge_failed, .unknown, .batch_blocked { background: var(--red); }
+    .plan_empty { background: var(--orange); }
+    .pending, .created { background: var(--gray); }
+    .batch-row td { border-top: 3px solid var(--line-strong); background: #101827; font-weight: 800; font-size: 14px; padding-top: 13px; }
+    .job-row.selected { background: rgba(37,99,235,.16); box-shadow: inset 3px 0 0 #60a5fa; }
+    .task-name { min-width: 0; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .task-role { display: block; margin-top: 2px; }
+    pre { white-space: pre-wrap; overflow: auto; overflow-wrap: anywhere; word-break: break-word; max-width: 100%; max-height: 460px; box-sizing: border-box; background: #020617; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+    .muted { color: var(--muted); font-size: 12px; }
+    .hidden { display: none; }
+    .toolbar { margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .task-text { max-height: 180px; color: #cbd5e1; }
+    .empty { color: var(--muted); padding: 18px 0; }
+    .run-list { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
+    .run-list-more { width: 100%; margin-top: 4px; }
+    .run-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel-2); cursor: pointer; transition: border-color .15s, transform .15s, background .15s; }
+    .run-card:hover { border-color: var(--line-strong); background: #162033; transform: translateY(-1px); }
+    .run-card.active { border-color: #60a5fa; box-shadow: inset 3px 0 0 #60a5fa; }
+    .run-card-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: flex-start; font-weight: 800; }
+    .run-card-name { min-width: 0; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .run-card-title .pill { flex: 0 0 auto; }
+    .run-card-id { margin-top: 5px; word-break: break-all; }
+    .run-card-created { margin-top: 4px; color: var(--muted); font-size: 12px; }
+    .run-card-progress { margin-top: 8px; display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+    .build-header { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel-2); margin-bottom: 14px; }
+    .build-title { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 900; }
+    .build-meta { margin-top: 6px; color: var(--muted); word-break: break-all; }
+    .log-panel { margin-top: 16px; }
+    .file-tabs button { font-size: 13px; }
+    .copy-btn { padding: 2px 6px; margin: 0 0 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.2; background: var(--gray); vertical-align: middle; }
+    .session-cell { word-break: break-all; }
+    .execution-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 -2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px 10px 0 0; background: #020617; color: var(--muted); font-size: 12px; }
+    .execution-summary.hidden { display: none; }
+    .execution-summary + pre { border-top-left-radius: 0; border-top-right-radius: 0; }
+    .notice { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #1f2937; color: #cbd5e1; }
+    .notice.warning { border-color: #92400e; background: rgba(180,83,9,.18); }
+    .file-content-wrap { position: relative; }
+    .floating-copy-btn { position: absolute; top: 8px; left: 8px; z-index: 2; opacity: 0; pointer-events: none; transition: opacity .15s; padding: 5px 8px; background: rgba(71,85,105,.92); }
+    .file-content-wrap:hover .floating-copy-btn:not(.hidden), .floating-copy-btn:focus { opacity: 1; pointer-events: auto; }
+    .floating-copy-btn:not(.hidden) + pre { padding-top: 42px; }
+  </style>
+</head>
+<body>
+<header><h1>Codex 编排看板</h1></header>
+<main>
+  <div class="sidebar">
+    <section>
+      <div class="toolbar">
+        <button onclick="showCreateForm()">新建任务批次</button>
+        <button class="secondary" onclick="refreshRuns()">刷新批次列表</button>
+      </div>
+      <h2>任务批次</h2>
+      <div id="runs" class="run-list"></div>
+    </section>
+  </div>
+  <div>
+    <section id="createPanel" class="hidden">
+      <h2>新建任务批次</h2>
+      <label>批次名称</label><input id="label" value="codex-task" />
+      <label>目标仓库</label><input id="repo" />
+      <label>运行目录</label><input id="runsDir" readonly />
+      <label>最大并发数</label><input id="maxParallel" type="number" value="3" min="1" max="16" />
+      <label>任务说明</label><textarea id="taskText" placeholder="粘贴任务说明"></textarea>
+      <div class="toolbar">
+        <button onclick="createRun()">创建批次</button>
+        <button class="secondary" onclick="hideCreateForm()">取消</button>
+      </div>
+    </section>
+
+    <section id="detailPanel">
+      <h2>批次详情</h2>
+      <div class="build-header">
+        <div id="selected" class="muted">未选择任务批次</div>
+        <div id="autoRefreshHint" class="muted">自动刷新：未启动</div>
+        <div id="runNotice" class="notice warning hidden"></div>
+        <div class="toolbar">
+          <button onclick="planRun()">拆分任务</button>
+          <button onclick="dispatchRun()">派发执行</button>
+          <button onclick="judgeRun()">汇总验收</button>
+          <button class="secondary" onclick="refreshSelected()">刷新状态</button>
+          <button class="secondary" onclick="stopSelectedRun()">停止</button>
+          <button class="danger" onclick="archiveSelectedRun()">归档</button>
+        </div>
+      </div>
+      <h3>任务说明</h3>
+      <pre id="taskDescription" class="task-text">未选择任务批次</pre>
+      <div id="tasks"></div>
+    </section>
+
+    <section id="filePanel" class="log-panel">
+      <h2>文件查看</h2>
+      <div id="fileTitle" class="muted">点击任务后选择文件</div>
+      <div class="toolbar file-tabs">
+        <button class="secondary" onclick="loadFile('prompt.md')">提示词</button>
+        <button class="secondary" onclick="loadFile('events.jsonl')">事件日志</button>
+        <button class="secondary" onclick="loadFile('events.pretty')">执行过程</button>
+        <button class="secondary" onclick="loadFile('stderr.log')">错误日志</button>
+        <button class="secondary" onclick="loadFile('last_message.md')">最终回复</button>
+        <button class="secondary" onclick="loadFile('exit_code')">退出码</button>
+        <button class="secondary" onclick="loadFile('result.json')">结果</button>
+        <button class="secondary" onclick="loadFile('evidence.json')">证据</button>
+        <button class="secondary" onclick="loadFile('judge_input.json')">验收输入</button>
+        <button class="secondary" onclick="loadFile('verdict.json')">验收结论</button>
+      </div>
+      <div id="executionSummary" class="execution-summary hidden"></div>
+      <div class="file-content-wrap">
+        <button id="copyLastMessageBtn" class="secondary copy-btn floating-copy-btn hidden" title="复制最终回复内容" onclick="copyFileContent(event)">⧉</button>
+        <pre id="fileContent"></pre>
+      </div>
+    </section>
+  </div>
+</main>
+<script>
+let selectedRun = null;
+let selectedTask = null;
+let selectedFileName = null;
+let currentState = null;
+let lastAutoRefreshAt = null;
+let runListVisibleCount = 10;
+let latestRuns = [];
+const AUTO_REFRESH_MS = 3000;
+const RUN_LIST_PAGE_SIZE = 10;
+
+async function api(path, opts={}) {
+  const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
+  if (!res.ok) throw new Error(await res.text());
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('application/json') ? res.json() : res.text();
+}
+const statusText = {
+  created: '已创建', pending: '等待中', planning: '拆分中', planned: '已拆分',
+  running: '执行中', completed: '已完成', failed: '失败', unknown: '未知',
+  workers_completed: '子任务完成', workers_failed: '子任务失败',
+  batches_completed: '批次完成', batch_blocked: '批次阻塞', plan_empty: '拆分为空', stopped: '已停止',
+  judging: '验收中', judged: '已验收', plan_failed: '拆分失败', judge_failed: '验收失败'
+};
+const roleText = { planner: '任务拆分', judge: '汇总验收' };
+function displayStatus(s) { return statusText[s] || s || '-'; }
+function displayRole(s) { return roleText[s] || s || '-'; }
+function pill(s) { return `<span class="pill ${s || ''}">${displayStatus(s)}</span>`; }
+function esc(s) { return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function formatDateTime(s) {
+  if (!s) return '-';
+  const date = new Date(s);
+  const pad = n => String(n).padStart(2, '0');
+  return `${date.getFullYear()}/${pad(date.getMonth() + 1)}/${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+function durationSeconds(start, end) {
+  if (!start) return '-';
+  const endMs = end ? new Date(end).getTime() : Date.now();
+  return Math.max(0, Math.round((endMs - new Date(start).getTime()) / 1000));
+}
+function runTimingText(s) { return `开始时刻 ${formatDateTime(s.createdAt)}｜用时 ${durationSeconds(s.createdAt, s.updatedAt)} 秒`; }
+
+async function loadHealth() {
+  const h = await api('/api/health');
+  document.getElementById('repo').value = h.defaultRepo;
+  document.getElementById('runsDir').value = h.runsDir;
+}
+function showCreateForm() {
+  selectedRun = null; selectedTask = null; selectedFileName = null; currentState = null;
+  clearFileView();
+  document.getElementById('createPanel').classList.remove('hidden');
+  document.getElementById('detailPanel').classList.add('hidden');
+  document.getElementById('filePanel').classList.add('hidden');
+}
+function hideCreateForm() {
+  document.getElementById('createPanel').classList.add('hidden');
+  document.getElementById('detailPanel').classList.remove('hidden');
+  document.getElementById('filePanel').classList.remove('hidden');
+}
+async function createRun() {
+  const body = { label: label.value, repo: repo.value, maxParallel: maxParallel.value, taskText: taskText.value };
+  const r = await api('/api/runs', { method: 'POST', body: JSON.stringify(body) });
+  selectedRun = r.runId; selectedTask = null; selectedFileName = null;
+  clearFileView();
+  hideCreateForm();
+  await refreshRuns(); await refreshSelected();
+}
+async function refreshRuns() {
+  const data = await api('/api/runs');
+  latestRuns = data.runs || [];
+  renderRunList();
+}
+function renderRunList() {
+  const visibleRuns = latestRuns.slice(0, runListVisibleCount);
+  const cards = visibleRuns.map(r => `
+    <div class="run-card ${selectedRun === r.runId ? 'active' : ''}" onclick="selectRun('${r.runId}')">
+      <div class="run-card-title"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span>${pill(r.status)}</div>
+      <div class="run-card-id muted">${esc(r.runId)}</div>
+      <div class="run-card-created">创建 ${esc(formatDateTime(r.createdAt))}</div>
+      <div class="run-card-progress"><span>进度 ${r.completed}/${r.total}</span><span>执行中 ${r.running}｜失败 ${r.failed}</span></div>
+    </div>`);
+  if (latestRuns.length > runListVisibleCount) {
+    cards.push(`<button class="secondary run-list-more" onclick="showMoreRuns()">查看更多（${runListVisibleCount}/${latestRuns.length}）</button>`);
+  }
+  document.getElementById('runs').innerHTML = latestRuns.length ? cards.join('') : '<div class="empty">暂无任务批次</div>';
+}
+function showMoreRuns() {
+  runListVisibleCount += RUN_LIST_PAGE_SIZE;
+  renderRunList();
+}
+async function selectRun(id) { selectedRun = id; selectedTask = null; selectedFileName = null; clearFileView(); hideCreateForm(); await refreshSelected(); }
+async function refreshSelected({auto=false} = {}) {
+  if (!selectedRun) return;
+  currentState = await api(`/api/runs/${selectedRun}/status`);
+  if (auto) lastAutoRefreshAt = new Date();
+  document.getElementById('selected').innerHTML = `<div class="build-title"><span>${esc(currentState.label)}</span>${pill(currentState.status)}</div><div class="build-meta">${esc(currentState.runId)}｜仓库=${esc(currentState.repo)}<br>${esc(runTimingText(currentState))}</div>`;
+  updateAutoRefreshHint();
+  updateRunNotice();
+  await loadTaskDescription();
+  renderTasks(); await refreshRuns();
+  if (selectedTask && selectedFileName) await loadFile(selectedFileName, { preserveScroll: true });
+}
+async function loadTaskDescription() {
+  if (!selectedRun) { document.getElementById('taskDescription').textContent = '未选择任务批次'; return; }
+  document.getElementById('taskDescription').textContent = await api(`/api/runs/${selectedRun}/task-text`);
+}
+function updateRunNotice() {
+  const el = document.getElementById('runNotice');
+  if (!el) return;
+  if (!currentState) {
+    el.classList.add('hidden');
+    el.textContent = '';
+    return;
+  }
+  const error = currentState.planner?.planParseError;
+  if (currentState.status === 'plan_empty') {
+    el.classList.remove('hidden');
+    el.textContent = `Planner 已完成，但没有拆出任何任务。可以调整任务说明或直接再次点击“拆分任务”重试。${error ? `原因：${error}` : ''}`;
+    return;
+  }
+  if (currentState.status === 'plan_failed' && error) {
+    el.classList.remove('hidden');
+    el.textContent = `Planner 拆分失败。可以再次点击“拆分任务”重试。原因：${error}`;
+    return;
+  }
+  el.classList.add('hidden');
+  el.textContent = '';
+}
+function updateAutoRefreshHint() {
+  const el = document.getElementById('autoRefreshHint');
+  if (!el) return;
+  if (!selectedRun || !currentState) { el.textContent = '自动刷新：未启动'; return; }
+  const active = ['planning','running','judging'].includes(currentState.status) || (currentState.tasks || []).some(t => t.status === 'running') || currentState.planner?.status === 'running' || currentState.judge?.status === 'running';
+  const last = lastAutoRefreshAt ? lastAutoRefreshAt.toLocaleTimeString() : '尚未触发';
+  el.textContent = active ? `自动刷新中：每 ${AUTO_REFRESH_MS / 1000} 秒刷新一次｜上次刷新 ${last}` : `自动刷新待命：每 ${AUTO_REFRESH_MS / 1000} 秒检查一次｜上次刷新 ${last}`;
+}
+function taskStatusCell(t) {
+  if (t?.manualCompletion) {
+    const original = t.originalStatus || t.manualCompletion.originalStatus || t.manualCompletion.previousStatus || 'unknown';
+    return `${pill(original)} <span class="pill completed">手动标记成功已完成</span>`;
+  }
+  return pill(t?.status);
+}
+function taskActionCell(id, t) {
+  if (!t || id === 'planner' || id === 'judge') return '-';
+  if (t.manualCompletion) return '<span class="muted">已人工确认</span>';
+  if (!['unknown', 'failed'].includes(t.status)) return '-';
+  return `<button class="danger" onclick="markTaskCompleted(event, '${id}')">手动标记成功</button>`;
+}
+function sessionCell(thread) {
+  if (!thread) return '-';
+  return `<span class="session-cell">${esc(thread)}</span><button class="copy-btn" title="复制 Codex 会话ID" onclick="copySessionId(event, '${esc(thread)}')">⧉</button>`;
+}
+function taskStartedCell(t) {
+  return t?.startedAt ? formatDateTime(t.startedAt) : '-';
+}
+function taskDurationCell(t) {
+  if (!t?.startedAt) return '-';
+  const end = t.endedAt || t.completedAt || t.stoppedAt || (t.status === 'running' ? null : t.updatedAt);
+  return `${durationSeconds(t.startedAt, end)} 秒`;
+}
+function taskRow(id, role, t) {
+  const thread = t?.codexThread?.id || '';
+  return `<tr class="job-row ${selectedTask === id ? 'selected' : ''}" onclick="selectTask('${id}')"><td><b class="task-name" title="${esc(id)}">${esc(id)}</b><span class="muted task-role">${esc(displayRole(role))}</span></td><td>${taskStatusCell(t)}</td><td>${esc(taskStartedCell(t))}</td><td>${esc(taskDurationCell(t))}</td><td>${esc(t?.pid || '-')}</td><td>${esc(t?.exitCode ?? '-')}</td><td>${sessionCell(thread)}</td><td>${esc(t?.files?.lastMessage?.exists ? '有' : '-')}</td><td>${taskActionCell(id, t)}</td></tr>`;
+}
+function renderTasks() {
+  const s = currentState;
+  const rows = [taskRow('planner','planner',s.planner)];
+  if (Array.isArray(s.batches) && s.batches.length) {
+    for (const b of s.batches) {
+      const done = (b.tasks || []).filter(t => t.status === 'completed').length;
+      rows.push(`<tr class="batch-row"><td colspan="9">${esc(b.name || b.id)} ${pill(b.status)} <span class="muted">${esc(b.id)}｜最大并发 ${esc(b.maxParallel || '-')}｜${done}/${(b.tasks || []).length}</span></td></tr>`);
+      for (const t of b.tasks || []) rows.push(taskRow(t.id, t.name, t));
+    }
+  } else rows.push(...(s.tasks||[]).map(t => taskRow(t.id, t.name, t)));
+  rows.push(taskRow('judge','最终验收',s.judge));
+  document.getElementById('tasks').innerHTML = `<table><tr><th>任务</th><th>状态</th><th>发起时间</th><th>用时</th><th>进程号</th><th>退出码</th><th>Codex 会话ID</th><th>最终回复</th><th>操作</th></tr>${rows.join('')}</table>`;
+}
+async function selectTask(id) {
+  selectedTask = id;
+  document.getElementById('fileTitle').textContent = `${selectedRun} / ${selectedTask}`;
+  renderTasks();
+  if (selectedFileName) await loadFile(selectedFileName);
+  else document.getElementById('fileContent').textContent = '';
+}
+async function loadFile(name, { preserveScroll = false } = {}) {
+  if (!selectedRun || !selectedTask) return;
+  selectedFileName = name;
+  const pre = document.getElementById('fileContent');
+  const previousScrollTop = pre.scrollTop;
+  const text = await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=${encodeURIComponent(name)}`);
+  pre.textContent = text;
+  if (preserveScroll) pre.scrollTop = previousScrollTop;
+  else pre.scrollTop = 0;
+  if (name === 'events.pretty') await renderExecutionSummary();
+  else hideExecutionSummary();
+  updateCopyLastMessageButton();
+}
+function clearFileView() {
+  document.getElementById('fileTitle').textContent = '点击任务后选择文件';
+  document.getElementById('fileContent').textContent = '';
+  hideExecutionSummary();
+  updateCopyLastMessageButton();
+}
+function updateCopyLastMessageButton() {
+  const button = document.getElementById('copyLastMessageBtn');
+  if (!button) return;
+  button.classList.toggle('hidden', selectedFileName !== 'last_message.md');
+  button.textContent = '⧉';
+}
+async function copyFileContent(event) {
+  event.stopPropagation();
+  const text = document.getElementById('fileContent').textContent || '';
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    event.currentTarget.textContent = '✓';
+    setTimeout(() => { event.currentTarget.textContent = '⧉'; }, 900);
+  } catch {
+    prompt('复制最终回复内容', text);
+  }
+}
+function hideExecutionSummary() {
+  const el = document.getElementById('executionSummary');
+  el.classList.add('hidden');
+  el.innerHTML = '';
+}
+async function renderExecutionSummary() {
+  const el = document.getElementById('executionSummary');
+  let raw = '';
+  try { raw = await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=events.jsonl`); }
+  catch { raw = ''; }
+  const summary = summarizeEventsJsonl(raw);
+  el.classList.remove('hidden');
+  el.innerHTML = `<span>事件 ${summary.events}</span><span>命令开始 ${summary.commandStarted}</span><span>命令完成 ${summary.commandCompleted}</span><span>MCP ${summary.mcpCalls}</span><span>文件变更 ${summary.fileChanges}</span><span>模型回复 ${summary.agentMessages}</span><span>推理 ${summary.reasoning}</span><span>命令类型 ${esc(summary.commandKindsText)}</span><button class="secondary copy-btn" onclick="scrollFileToBottom()">跳到末尾</button>`;
+}
+function summarizeEventsJsonl(raw) {
+  const summary = { events: 0, commandStarted: 0, commandCompleted: 0, mcpCalls: 0, fileChanges: 0, agentMessages: 0, reasoning: 0, commandKinds: new Map(), commandKindsText: '-' };
+  for (const line of String(raw || '').split(/\r?\n/).filter(Boolean)) {
+    let event;
+    try { event = JSON.parse(line); } catch { continue; }
+    summary.events++;
+    const item = event.item || {};
+    const type = item.type || '';
+    if (type === 'command_execution') {
+      if (event.type === 'item.started') summary.commandStarted++;
+      if (event.type === 'item.completed') summary.commandCompleted++;
+      const kind = commandKind(item.command || 'unknown');
+      summary.commandKinds.set(kind, (summary.commandKinds.get(kind) || 0) + 1);
+    }
+    if (type === 'mcp_tool_call' || type === 'mcpToolCall') summary.mcpCalls++;
+    if (type === 'file_change' || type === 'fileChange') summary.fileChanges++;
+    if (type === 'agent_message' || type === 'agentMessage') summary.agentMessages++;
+    if (type === 'reasoning') summary.reasoning++;
+  }
+  const kinds = [...summary.commandKinds.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  summary.commandKindsText = kinds.length ? kinds.map(([kind, count]) => `${kind}:${count}`).join(' / ') : '-';
+  return summary;
+}
+function commandKind(command) {
+  const text = String(command || '').trim();
+  if (text.includes('apply_patch')) return 'apply_patch';
+  if (text.includes('npm ')) return 'npm';
+  if (text.includes('git ')) return 'git';
+  if (text.includes('rg ')) return 'rg';
+  if (text.includes('python')) return 'python';
+  if (text.includes('node ')) return 'node';
+  if (text.includes('curl ')) return 'curl';
+  const match = text.match(/(?:^|\s)([\w./-]+)(?:\s|$)/);
+  return match ? match[1].split('/').pop() : 'unknown';
+}
+function scrollFileToBottom() {
+  const pre = document.getElementById('fileContent');
+  pre.scrollTop = pre.scrollHeight;
+}
+async function copySessionId(event, thread) {
+  event.stopPropagation();
+  try {
+    await navigator.clipboard.writeText(thread);
+    event.currentTarget.textContent = '✓';
+    setTimeout(() => { event.currentTarget.textContent = '⧉'; }, 900);
+  } catch {
+    prompt('复制 Codex 会话ID', thread);
+  }
+}
+async function planRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/plan`, {method:'POST'}); await refreshSelected(); }); }
+async function dispatchRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/dispatch`, {method:'POST'}); await refreshSelected(); }); }
+async function judgeRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/judge`, {method:'POST'}); await refreshSelected(); }); }
+async function runAction(fn) {
+  try { await fn(); }
+  catch (error) { alert(error.message || String(error)); }
+}
+async function stopSelectedRun() {
+  if (!selectedRun) return;
+  const ok = confirm('确认停止当前任务批次？\n\n停止会终止仍在运行的 codex exec 子进程，并冻结后续调度。');
+  if (!ok) return;
+  await api(`/api/runs/${selectedRun}/stop`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: 'stopped from dashboard' })
+  });
+  await refreshSelected();
+}
+async function archiveSelectedRun() {
+  if (!selectedRun) return;
+  const ok = confirm('确认归档当前任务批次？\n\n归档后会从默认任务批次列表隐藏。若仍有任务运行，请先停止。');
+  if (!ok) return;
+  await api(`/api/runs/${selectedRun}/archive`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: 'archived from dashboard' })
+  });
+  selectedRun = null; selectedTask = null; selectedFileName = null; currentState = null;
+  document.getElementById('selected').textContent = '未选择任务批次';
+  document.getElementById('taskDescription').textContent = '未选择任务批次';
+  document.getElementById('tasks').innerHTML = '';
+  clearFileView();
+  updateAutoRefreshHint();
+  await refreshRuns();
+}
+async function markTaskCompleted(event, taskId) {
+  event.stopPropagation();
+  if (!selectedRun || taskId === 'planner' || taskId === 'judge') return;
+  const task = (currentState?.tasks || []).find(t => t.id === taskId);
+  if (task?.status === 'running') { alert('任务仍在执行中，不能手动标记成功。'); return; }
+  const ok = confirm(`确认将任务 ${taskId} 手动标记为成功？\n\n请仅在你已经通过 CLI / Codex 会话确认该任务实际完成时使用。\n原始状态会保留在页面和 manual_completion.json 中。`);
+  if (!ok) return;
+  selectedTask = taskId;
+  await api(`/api/runs/${selectedRun}/tasks/${taskId}/mark-completed`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: 'manual success confirmed from dashboard' })
+  });
+  await refreshSelected();
+  await loadFile('manual_completion.json');
+}
+
+loadHealth().then(refreshRuns);
+setInterval(() => { if (selectedRun) refreshSelected({auto:true}).catch(console.error); else refreshRuns().catch(console.error); }, AUTO_REFRESH_MS);
+</script>
+</body>
+</html>
