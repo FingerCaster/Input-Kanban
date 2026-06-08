@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "type": "module",
   "bin": {
-    "input-kanban": "./bin/input-kanban.js"
+    "input-kanban": "bin/input-kanban.js"
   },
   "scripts": {
     "start": "node bin/input-kanban.js",
