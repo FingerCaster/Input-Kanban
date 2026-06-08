@@ -2,42 +2,48 @@
 
 [中文](README.md) | English
 
-Input Kanban is a local dashboard for orchestrating Codex work with `codex exec`. Install it from npm, run `input-kanban`, and manage planner, worker, and final judge runs from your browser.
+Input Kanban is a local Codex orchestration dashboard. The recommended path is to install it from npm, run `input-kanban` inside the target repository, and use the browser UI to manage planning, worker execution, and final judging.
 
-## Install
+## Recommended Usage
+
+### 1. Install
 
 ```bash
 npm install -g input-kanban
 ```
 
-Verify the CLI:
+Verify the installation:
 
 ```bash
 input-kanban --help
 ```
 
-## Start
+### 2. Start in the Target Repository
 
-Run from the repository you want Codex to work on:
+Enter the repository you want Codex to modify or inspect:
 
 ```bash
-cd /path/to/repo
+cd /path/to/your/repo
 input-kanban
 ```
 
-Then open:
+By default, this starts a local server at:
 
 ```text
 http://127.0.0.1:8787
 ```
 
-Or provide the target repository explicitly:
+Open that URL in your browser to use the dashboard.
+
+### 3. Start with an Explicit Repository
+
+If you do not want to `cd` into the target repository first, pass it explicitly:
 
 ```bash
-input-kanban --repo /path/to/repo
+input-kanban --repo /path/to/your/repo
 ```
 
-## Common Options
+## Common Startup Options
 
 ```bash
 input-kanban --port 8787
@@ -49,36 +55,40 @@ input-kanban --open
 
 Defaults:
 
-- repo: current working directory
+- target repository: the current directory where `input-kanban` is launched
 - host: `127.0.0.1`
 - port: `8787`
 - runs directory: `~/.input-kanban/runs`
-- Codex binary: `codex`
+- Codex command: `codex`
 
-## What It Does
+## Using the Dashboard
 
-- Creates local task runs from user-provided task text.
-- Starts a read-only planner with `codex exec --json`.
-- Schedules workers by strict batch barriers and `batch.maxParallel`.
-- Tracks local process status, exit codes, logs, final messages, and artifacts.
-- Generates `judge_input.json` and runs one final judge after all batches complete.
-- Supports stopping runs, soft-archiving runs, and manually marking failed or unknown workers as completed.
-- Shows formatted Codex JSONL logs in the dashboard.
+1. Click `New Run`.
+2. Enter a label, target repository, and task description.
+3. Click `Create Run`.
+4. Click `Plan` to let the Codex planner generate batches and workers.
+5. Click `Dispatch` to run workers by batch barrier and concurrency limits.
+6. Inspect execution logs, final messages, error logs, and artifacts.
+7. After all batches complete, click `Final Judge`.
+8. Stop or archive a run when needed, or manually mark a confirmed failed/unknown worker as completed.
 
-## Typical Workflow
+## What It Is For
 
-1. Start `input-kanban` in the target repository.
-2. Open the dashboard.
-3. Create a run with task text.
-4. Click `Plan` to generate batches and workers.
-5. Click `Dispatch` to run workers.
-6. Inspect logs, final messages, and artifacts.
-7. Click `Final Judge` after all batches complete.
-8. Stop or archive runs when needed.
+- Split a larger Codex programming task into multiple workers.
+- Control execution order with batch barriers.
+- Observe each worker's local status, logs, and final response.
+- Run a final judge after all workers complete.
+- Keep local run records for debugging and recovery.
 
-## Runtime Data
+## Runtime Data Location
 
-Runtime data is stored under the configured runs directory:
+Runtime data is stored in the configured runs directory. The CLI default is:
+
+```text
+~/.input-kanban/runs
+```
+
+Each run roughly looks like this:
 
 ```text
 runs/<runId>/
@@ -92,13 +102,17 @@ runs/<runId>/
     └── verdict.json
 ```
 
-For CLI usage, the default runs directory is:
+These files are local run records and do not need to be committed to your application repository.
 
-```text
-~/.input-kanban/runs
-```
+## Requirements
 
-## Development
+- Node.js 20 or newer.
+- Codex CLI installed and configured.
+- The `codex` command works in your terminal, or `--codex-bin` points to the Codex executable.
+
+## Maintainer Development
+
+If you want to develop Input Kanban itself instead of using it as an end user:
 
 ```bash
 git clone https://github.com/zhang3xing1/Input-Kanban.git
