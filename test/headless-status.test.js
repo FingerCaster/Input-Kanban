@@ -45,6 +45,7 @@ test('refreshRun keeps headless runs free of tmux controls when metadata is abse
 
   const state = await refreshRun('run_headless_status');
   assert.equal(state.runner, 'headless');
+  assert.equal(state.tmux, undefined);
   assert.equal(state.tasks[0].status, 'completed');
   assert.equal(state.tasks[0].tmux, undefined);
 });
@@ -57,5 +58,5 @@ test('headless task without tmux metadata does not get manual attention hint', a
   await fsp.utimes(path.join(workerDir, 'stderr.log'), old, old);
 
   const state = await refreshRun('run_headless_attention');
-  assert.equal(state.tasks[0].attentionHint, null);
+  assert.equal(state.tasks[0].attentionHint, undefined);
 });

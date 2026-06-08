@@ -13,9 +13,11 @@ import {
   tmuxKillSession,
   tmuxKillWindow,
   tmuxNewSession,
-  tmuxNewWindow
+  tmuxNewWindow,
+  tmuxSelectLayout,
+  tmuxSplitWindow
 } from '../src/tmux.js';
-import { createDefaultRunner, createTmuxRunner, headlessRunner } from '../src/runners/index.js';
+import { createDefaultRunner, createHeadlessRunner, createTmuxRunner, headlessRunner } from '../src/runners/index.js';
 
 function makeRunner(handler) {
   const calls = [];
@@ -72,6 +74,8 @@ test('tmux wrappers invoke tmux with argument arrays and sanitized names', async
   await tmuxNewWindow('Run 01/工作', 'Worker: T-01', { runner, cwd: '/repo' });
   await tmuxKillSession('Run 01/工作', { runner });
   await tmuxKillWindow('Run 01/工作', 'Worker: T-01', { runner });
+  await tmuxSplitWindow('Run 01/工作', 'Worker: T-01', { runner, cwd: '/repo', command: 'echo pane' });
+  await tmuxSelectLayout('Run 01/工作', 'Worker: T-01', 'tiled', { runner });
 
   assert.deepEqual(calls.map(call => call.args), [
     ['-V'],
@@ -81,7 +85,11 @@ test('tmux wrappers invoke tmux with argument arrays and sanitized names', async
     ['-V'],
     ['kill-session', '-t', 'Run-01'],
     ['-V'],
-    ['kill-window', '-t', 'Run-01:Worker-T-01']
+    ['kill-window', '-t', 'Run-01:Worker-T-01'],
+    ['-V'],
+    ['split-window', '-t', 'Run-01:Worker-T-01', '-h', '-c', '/repo', 'echo pane'],
+    ['-V'],
+    ['select-layout', '-t', 'Run-01:Worker-T-01', 'tiled']
   ]);
 });
 
@@ -158,6 +166,8 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
   const handle = await runner.startCodexTask({
     runId: 'run_01',
     taskId: 'planner',
+    batchId: 'planner',
+    runStatePath: path.join(tmp, 'run_state.json'),
     prompt: 'plan this',
     sandbox: 'read-only',
     cwd: tmp,
@@ -169,11 +179,29 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
   const script = await fsp.readFile(path.join(outDir, 'run.sh'), 'utf8');
   assert.match(script, /CODEX_BIN='\/usr\/local\/bin\/codex'/);
   assert.match(script, /\$CODEX_BIN" exec --json --sandbox/);
+  assert.match(script, /touch "\$EVENTS" "\$STDERR_LOG"/);
+  assert.match(script, /FORMATTER_BIN='/);
+  assert.match(script, /> >\(tee -a "\$EVENTS" \| node "\$FORMATTER_BIN"\) 2> >\(tee -a "\$STDERR_LOG" >&2\)/);
   assert.match(script, /printf '%s' "\$code" > "\$EXIT_CODE"/);
+  assert.match(script, /RUN_ID='run_01'/);
+  assert.match(script, /TASK_ID='planner'/);
+  assert.match(script, /ROLE='planner'/);
+  assert.match(script, /Input Kanban tmux task completed/);
+  assert.match(script, /printf 'runId: %s\\n' "\$RUN_ID"/);
+  assert.match(script, /printf 'taskId: %s\\n' "\$TASK_ID"/);
+  assert.match(script, /printf 'role: %s\\n' "\$ROLE"/);
+  assert.match(script, /printf 'exit code: %s\\n' "\$code"/);
+  assert.match(script, /printf 'artifact dir: %s\\n' "\$OUT_DIR"/);
+  assert.match(script, /Type exit or press Ctrl-D to close this tmux window/);
+  assert.match(script, /exec "\$\{SHELL:-\/bin\/sh\}" -i/);
+  assert.ok(script.indexOf(`printf '%s' "$code" > "$EXIT_CODE"`) < script.indexOf('Input Kanban tmux task completed'));
+  assert.ok(script.indexOf('Input Kanban tmux task completed') < script.indexOf('exec "${SHELL:-/bin/sh}" -i'));
 
   const metadata = JSON.parse(await fsp.readFile(path.join(outDir, 'tmux.json'), 'utf8'));
   assert.equal(metadata.type, 'input_kanban_tmux_task');
   assert.equal(metadata.runner, 'tmux');
+  assert.equal(metadata.ready, true);
+  assert.equal(metadata.status, 'ready');
   assert.equal(metadata.sessionName, 'input-kanban-run_01');
   assert.equal(metadata.windowName, 'planner');
   assert.equal(metadata.target, 'input-kanban-run_01:planner');
@@ -181,13 +209,19 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
   assert.equal(metadata.selectWindowCommand, 'tmux select-window -t input-kanban-run_01:planner');
   assert.equal(metadata.selectCommand, metadata.selectWindowCommand);
   assert.equal(metadata.runScript, path.join(outDir, 'run.sh'));
+  assert.ok(metadata.readyAt);
 
-  assert.deepEqual(calls.map(call => call.args), [
-    ['-V'],
-    ['has-session', '-t', 'input-kanban-run_01'],
-    ['-V'],
-    ['new-session', '-d', '-s', 'input-kanban-run_01', '-n', 'planner', '-c', tmp, path.join(outDir, 'run.sh')]
-  ]);
+  assert.deepEqual(calls[0].args, ['-V']);
+  assert.deepEqual(calls[1].args, ['has-session', '-t', 'input-kanban-run_01']);
+  assert.deepEqual(calls[2].args, ['-V']);
+  assert.deepEqual(calls[3].args.slice(0, -1), ['new-session', '-d', '-s', 'input-kanban-run_01', '-n', 'planner', '-c', tmp]);
+  assert.deepEqual(calls[4].args, ['-V']);
+  assert.deepEqual(calls[5].args.slice(0, -1), ['split-window', '-t', 'input-kanban-run_01:planner', '-v', '-c', tmp]);
+  assert.deepEqual(calls[6].args, ['-V']);
+  assert.deepEqual(calls[7].args, ['select-layout', '-t', 'input-kanban-run_01:planner', 'tiled']);
+  assert.match(calls[3].args.at(-1), /input-kanban-tmux-overview\.js/);
+  assert.match(calls[3].args.at(-1), /run_state\.json/);
+  assert.equal(calls[5].args.at(-1), path.join(outDir, 'run.sh'));
   assert.equal(calls.some(call => call.args.includes('send-keys')), false);
 
   const exitCode = await new Promise(resolve => {
@@ -196,4 +230,103 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
   });
   assert.equal(exitCode, 0);
   assert.equal(runner.hasRunning('run_01', 'planner'), false);
+});
+
+test('tmux runner records failed metadata without ready commands when tmux creation fails', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-tmux-failed-metadata-'));
+  const outDir = path.join(tmp, 'planner');
+  const { runner: commandRunner } = makeRunner((_command, args) => {
+    if (args[0] === '-V') return { code: 0, stdout: 'tmux 3.4\n' };
+    if (args[0] === 'has-session') return { code: 1, stderr: 'no such session' };
+    if (args[0] === 'new-session') return { code: 1, stderr: 'Operation not permitted' };
+    return { code: 0, stdout: '' };
+  });
+  const runner = createTmuxRunner({
+    codexBin: '/usr/local/bin/codex',
+    tmuxOptions: { runner: commandRunner },
+    pollMs: 20
+  });
+
+  await assert.rejects(
+    () => runner.startCodexTask({
+      runId: 'run_failed_metadata',
+      taskId: 'planner',
+      prompt: 'plan this',
+      sandbox: 'read-only',
+      cwd: tmp,
+      outDir
+    }),
+    /Operation not permitted/
+  );
+
+  const metadata = JSON.parse(await fsp.readFile(path.join(outDir, 'tmux.json'), 'utf8'));
+  assert.equal(metadata.runner, 'tmux');
+  assert.equal(metadata.ready, false);
+  assert.equal(metadata.status, 'failed');
+  assert.match(metadata.error, /Operation not permitted/);
+  assert.equal(metadata.attachCommand, undefined);
+  assert.equal(metadata.selectWindowCommand, undefined);
+});
+
+test('tmux run script keep-open summary is generated for worker and judge roles', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-tmux-roles-'));
+  const { runner: commandRunner } = makeRunner((_command, args) => {
+    if (args[0] === '-V') return { code: 0, stdout: 'tmux 3.4\n' };
+    if (args[0] === 'has-session') return { code: 0, stdout: '' };
+    return { code: 0, stdout: '' };
+  });
+  const runner = createTmuxRunner({
+    codexBin: '/usr/local/bin/codex',
+    tmuxOptions: { runner: commandRunner },
+    pollMs: 20
+  });
+
+  for (const taskId of ['T-01', 'judge']) {
+    const outDir = path.join(tmp, taskId);
+    const handle = await runner.startCodexTask({
+      runId: 'run_roles',
+      taskId,
+      prompt: `prompt for ${taskId}`,
+      sandbox: 'read-only',
+      cwd: tmp,
+      outDir
+    });
+    const script = await fsp.readFile(path.join(outDir, 'run.sh'), 'utf8');
+    const expectedRole = taskId === 'judge' ? 'judge' : 'worker';
+    assert.match(script, new RegExp(`RUN_ID='run_roles'`));
+    assert.match(script, new RegExp(`TASK_ID='${taskId}'`));
+    assert.match(script, new RegExp(`ROLE='${expectedRole}'`));
+    assert.match(script, /Type exit or press Ctrl-D to close this tmux window/);
+    assert.ok(script.indexOf(`printf '%s' "$code" > "$EXIT_CODE"`) < script.indexOf('Input Kanban tmux task completed'));
+
+    const exitCode = await new Promise(resolve => {
+      handle.onExit(resolve);
+      fsp.writeFile(path.join(outDir, 'exit_code'), '0');
+    });
+    assert.equal(exitCode, 0);
+  }
+});
+
+test('headless runner does not generate tmux keep-open run script', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-headless-runner-'));
+  const outDir = path.join(tmp, 'worker');
+  await fsp.mkdir(outDir, { recursive: true });
+  const runner = createHeadlessRunner({ codexBin: '/bin/echo' });
+
+  const handle = runner.startCodexTask({
+    runId: 'run_headless',
+    taskId: 'T-01',
+    prompt: 'headless prompt',
+    sandbox: 'read-only',
+    cwd: tmp,
+    outDir
+  });
+  const exitCode = await new Promise(resolve => handle.onExit(resolve));
+
+  assert.equal(exitCode, 0);
+  assert.equal(await fsp.readFile(path.join(outDir, 'prompt.md'), 'utf8'), 'headless prompt');
+  await assert.rejects(() => fsp.readFile(path.join(outDir, 'run.sh'), 'utf8'), { code: 'ENOENT' });
+  const events = await fsp.readFile(path.join(outDir, 'events.jsonl'), 'utf8');
+  assert.doesNotMatch(events, /Type exit or press Ctrl-D to close this tmux window/);
+  assert.equal(await fsp.readFile(path.join(outDir, 'exit_code'), 'utf8'), '0');
 });

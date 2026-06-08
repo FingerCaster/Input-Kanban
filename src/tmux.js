@@ -132,6 +132,23 @@ export async function tmuxKillSession(sessionName, options = {}) {
   return runTmux(['kill-session', '-t', sanitizeTmuxSessionName(sessionName)], options);
 }
 
+export async function tmuxSplitWindow(sessionName, windowName, options = {}) {
+  const session = sanitizeTmuxSessionName(sessionName);
+  const window = sanitizeTmuxWindowName(windowName);
+  const args = ['split-window', '-t', `${session}:${window}`];
+  if (options.vertical) args.push('-v');
+  else args.push('-h');
+  if (options.cwd) args.push('-c', options.cwd);
+  if (options.command) args.push(options.command);
+  return runTmux(args, options);
+}
+
+export async function tmuxSelectLayout(sessionName, windowName, layout = 'tiled', options = {}) {
+  const session = sanitizeTmuxSessionName(sessionName);
+  const window = sanitizeTmuxWindowName(windowName);
+  return runTmux(['select-layout', '-t', `${session}:${window}`, layout], options);
+}
+
 export async function tmuxKillWindow(sessionName, windowName, options = {}) {
   const session = sanitizeTmuxSessionName(sessionName);
   const window = sanitizeTmuxWindowName(windowName);

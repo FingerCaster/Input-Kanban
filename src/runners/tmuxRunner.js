@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import {
@@ -14,7 +15,9 @@ import {
   tmuxHasSession,
   tmuxKillSession,
   tmuxNewSession,
-  tmuxNewWindow
+  tmuxNewWindow,
+  tmuxSelectLayout,
+  tmuxSplitWindow
 } from '../tmux.js';
 
 function processKey(runId, taskId) {
@@ -27,9 +30,10 @@ function roleForTask(taskId) {
   return 'worker';
 }
 
-function windowNameForTask(taskId) {
+function windowNameForTask(taskId, batchId = null) {
   const role = roleForTask(taskId);
-  return sanitizeTmuxWindowName(role === 'worker' ? `worker-${taskId}` : role);
+  if (role === 'worker') return sanitizeTmuxWindowName(batchId || 'batch-1');
+  return sanitizeTmuxWindowName(role);
 }
 
 function sessionNameForRun(runId) {
@@ -40,7 +44,17 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
-function buildRunScript({ codexBin, sandbox, cwd, outDir }) {
+const BIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin');
+const FORMATTER_BIN = path.join(BIN_DIR, 'input-kanban-format-events.js');
+const OVERVIEW_BIN = path.join(BIN_DIR, 'input-kanban-tmux-overview.js');
+
+function buildOverviewCommand(runStatePath) {
+  const quotedStatePath = shellQuote(runStatePath);
+  const quotedOverviewBin = shellQuote(OVERVIEW_BIN);
+  return `while true; do clear; node ${quotedOverviewBin} ${quotedStatePath}; sleep 2; done`;
+}
+
+function buildRunScript({ codexBin, formatterBin = FORMATTER_BIN, sandbox, cwd, outDir, runId, taskId, role }) {
   return `#!/usr/bin/env bash
 set -u
 
@@ -48,18 +62,30 @@ CODEX_BIN=${shellQuote(codexBin)}
 SANDBOX=${shellQuote(sandbox)}
 CWD=${shellQuote(cwd)}
 OUT_DIR=${shellQuote(outDir)}
+RUN_ID=${shellQuote(runId)}
+TASK_ID=${shellQuote(taskId)}
+ROLE=${shellQuote(role)}
 PROMPT_FILE="$OUT_DIR/prompt.md"
 EVENTS="$OUT_DIR/events.jsonl"
 STDERR_LOG="$OUT_DIR/stderr.log"
+FORMATTER_BIN=${shellQuote(formatterBin)}
 LAST_MESSAGE="$OUT_DIR/last_message.md"
 EXIT_CODE="$OUT_DIR/exit_code"
 
 cd "$CWD"
 rm -f "$EXIT_CODE"
-"$CODEX_BIN" exec --json --sandbox "$SANDBOX" -C "$CWD" -o "$LAST_MESSAGE" "$(<"$PROMPT_FILE")" >>"$EVENTS" 2>>"$STDERR_LOG"
+touch "$EVENTS" "$STDERR_LOG"
+"$CODEX_BIN" exec --json --sandbox "$SANDBOX" -C "$CWD" -o "$LAST_MESSAGE" "$(<"$PROMPT_FILE")" > >(tee -a "$EVENTS" | node "$FORMATTER_BIN") 2> >(tee -a "$STDERR_LOG" >&2)
 code=$?
 printf '%s' "$code" > "$EXIT_CODE"
-exit "$code"
+printf '\\nInput Kanban tmux task completed.\\n'
+printf 'runId: %s\\n' "$RUN_ID"
+printf 'taskId: %s\\n' "$TASK_ID"
+printf 'role: %s\\n' "$ROLE"
+printf 'exit code: %s\\n' "$code"
+printf 'artifact dir: %s\\n' "$OUT_DIR"
+printf 'Type exit or press Ctrl-D to close this tmux window.\\n'
+exec "\${SHELL:-/bin/sh}" -i
 `;
 }
 
@@ -71,11 +97,11 @@ export function createTmuxRunner({
 } = {}) {
   const runningWindows = new Map();
 
-  async function startCodexTask({ runId, taskId, prompt, sandbox, cwd, outDir }) {
+  async function startCodexTask({ runId, taskId, batchId = null, runStatePath = null, prompt, sandbox, cwd, outDir }) {
     await ensureDir(outDir);
     const sessionName = sessionNameForRun(runId);
-    const windowName = windowNameForTask(taskId);
     const role = roleForTask(taskId);
+    const windowName = windowNameForTask(taskId, batchId);
     const key = processKey(runId, taskId);
     const promptFile = path.join(outDir, 'prompt.md');
     const runScript = path.join(outDir, 'run.sh');
@@ -84,7 +110,7 @@ export function createTmuxRunner({
     const startedAt = nowIso();
 
     await fsp.writeFile(promptFile, prompt);
-    await fsp.writeFile(runScript, buildRunScript({ codexBin, sandbox, cwd, outDir }));
+    await fsp.writeFile(runScript, buildRunScript({ codexBin, sandbox, cwd, outDir, runId, taskId, role }));
     await fsp.chmod(runScript, 0o755);
 
     const metadata = {
@@ -94,31 +120,55 @@ export function createTmuxRunner({
       runId,
       taskId,
       role,
+      batchId,
       sessionName,
       windowName,
       target: `${sessionName}:${windowName}`,
-      attachCommand: `${tmuxBin} attach-session -t ${sessionName}`,
-      selectWindowCommand: `${tmuxBin} select-window -t ${sessionName}:${windowName}`,
-      selectCommand: `${tmuxBin} select-window -t ${sessionName}:${windowName}`,
       runScript,
       promptFile,
       cwd,
       sandbox,
-      startedAt
+      startedAt,
+      ready: false,
+      status: 'pending'
     };
     await writeJsonAtomic(metadataFile, metadata);
 
-    const tmuxCommandOptions = {
-      ...tmuxOptions,
-      tmuxBin,
-      cwd,
-      command: runScript
-    };
-    if (await tmuxHasSession(sessionName, tmuxCommandOptions)) {
-      await tmuxNewWindow(sessionName, windowName, tmuxCommandOptions);
-    } else {
-      await tmuxNewSession(sessionName, { ...tmuxCommandOptions, windowName });
+    const overviewCommand = buildOverviewCommand(runStatePath || path.join(path.dirname(path.dirname(outDir)), 'run_state.json'));
+    const tmuxCommandOptions = { ...tmuxOptions, tmuxBin, cwd };
+    try {
+      if (await tmuxHasSession(sessionName, tmuxCommandOptions)) {
+        if (!runningWindows.has(`${runId}:__window:${windowName}`)) {
+          await tmuxNewWindow(sessionName, windowName, { ...tmuxCommandOptions, command: overviewCommand });
+          runningWindows.set(`${runId}:__window:${windowName}`, { sessionName, windowName, overview: true });
+        }
+      } else {
+        await tmuxNewSession(sessionName, { ...tmuxCommandOptions, windowName, command: overviewCommand });
+        runningWindows.set(`${runId}:__window:${windowName}`, { sessionName, windowName, overview: true });
+      }
+      await tmuxSplitWindow(sessionName, windowName, { ...tmuxCommandOptions, vertical: true, command: runScript });
+      await tmuxSelectLayout(sessionName, windowName, 'tiled', tmuxCommandOptions);
+    } catch (error) {
+      await writeJsonAtomic(metadataFile, {
+        ...metadata,
+        ready: false,
+        status: 'failed',
+        error: error?.message || String(error),
+        failedAt: nowIso()
+      });
+      throw error;
     }
+
+    await writeJsonAtomic(metadataFile, {
+      ...metadata,
+      ready: true,
+      status: 'ready',
+      attachCommand: `${tmuxBin} attach-session -t ${sessionName}`,
+      selectWindowCommand: `${tmuxBin} select-window -t ${sessionName}:${windowName}`,
+      selectCommand: `${tmuxBin} select-window -t ${sessionName}:${windowName}`,
+      paneCommand: `${tmuxBin} select-window -t ${sessionName}:${windowName}`,
+      readyAt: nowIso()
+    });
 
     const listeners = [];
     let exited = false;

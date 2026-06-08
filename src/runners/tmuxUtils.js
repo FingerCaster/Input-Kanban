@@ -11,5 +11,7 @@ export {
   tmuxKillSession,
   tmuxKillWindow,
   tmuxNewSession,
-  tmuxNewWindow
+  tmuxNewWindow,
+  tmuxSelectLayout,
+  tmuxSplitWindow
 } from '../tmux.js';

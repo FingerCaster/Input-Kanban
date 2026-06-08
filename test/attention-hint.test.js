@@ -4,20 +4,20 @@ import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
-const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-attention-'));
+const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-attention-removed-'));
 process.env.KANBAN_RUNS_DIR = tmp;
 process.env.KANBAN_RUNNER = 'tmux';
 process.env.KANBAN_CODEX_BIN = 'node';
-const { refreshRun } = await import(`../src/orchestrator.js?attention=${Date.now()}`);
+const { refreshRun } = await import(`../src/orchestrator.js?attention-removed=${Date.now()}`);
 
-async function writeRunState(tmp, { runId, runner, startedAt }) {
+async function writeRunState({ runId, runner = 'tmux', startedAt }) {
   const runDir = path.join(tmp, runId);
   const workerDir = path.join(runDir, 'workers', 'T-01');
   await fsp.mkdir(workerDir, { recursive: true });
   await fsp.writeFile(path.join(runDir, 'task.md'), 'task');
   await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
     runId,
-    label: 'attention hint',
+    label: 'attention hint removed',
     repo: tmp,
     runner,
     maxParallel: 1,
@@ -37,37 +37,24 @@ async function writeRunState(tmp, { runId, runner, startedAt }) {
   return { runDir, workerDir };
 }
 
-test('running tmux task gets manual attention hint when logs are stale', async () => {
+test('tmux codex exec tasks do not show manual intervention hints for stale logs', async () => {
   const startedAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-  const { workerDir } = await writeRunState(tmp, { runId: 'run_stale_tmux', runner: 'tmux', startedAt });
-  await fsp.writeFile(path.join(workerDir, 'tmux.json'), JSON.stringify({ runner: 'tmux', attachCommand: 'tmux attach-session -t stale' }));
+  const { workerDir } = await writeRunState({ runId: 'run_stale_tmux_no_hint', startedAt });
+  await fsp.writeFile(path.join(workerDir, 'tmux.json'), JSON.stringify({ runner: 'tmux', ready: true, status: 'ready', attachCommand: 'tmux attach-session -t stale' }));
   await fsp.writeFile(path.join(workerDir, 'events.jsonl'), '{"event":"old"}\n');
   const old = new Date(Date.now() - 8 * 60 * 1000);
   await fsp.utimes(path.join(workerDir, 'events.jsonl'), old, old);
 
-  const state = await refreshRun('run_stale_tmux');
-  assert.match(state.tasks[0].attentionHint.message, /manual intervention/);
-  assert.match(state.tasks[0].attentionHint.reasons.join(' '), /no recent log updates/);
-  assert.equal(state.tasks[0].attentionHint.attachCommand, 'tmux attach-session -t stale');
+  const state = await refreshRun('run_stale_tmux_no_hint');
+  assert.equal(state.tasks[0].attentionHint, undefined);
 });
 
-test('running tmux task gets manual attention hint for conservative stderr keywords', async () => {
+test('tmux codex exec tasks do not show manual intervention hints for approval-like log text', async () => {
   const startedAt = new Date().toISOString();
-  const { workerDir } = await writeRunState(tmp, { runId: 'run_keyword_tmux', runner: 'tmux', startedAt });
-  await fsp.writeFile(path.join(workerDir, 'tmux.json'), JSON.stringify({ runner: 'tmux', attachCommand: 'tmux attach-session -t keyword' }));
+  const { workerDir } = await writeRunState({ runId: 'run_keyword_tmux_no_hint', startedAt });
+  await fsp.writeFile(path.join(workerDir, 'tmux.json'), JSON.stringify({ runner: 'tmux', ready: true, status: 'ready', attachCommand: 'tmux attach-session -t keyword' }));
   await fsp.writeFile(path.join(workerDir, 'stderr.log'), 'Waiting for approval before continuing.\n');
 
-  const state = await refreshRun('run_keyword_tmux');
-  assert.match(state.tasks[0].attentionHint.reasons.join(' '), /approval/);
-});
-
-test('headless task without tmux metadata does not get manual attention hint', async () => {
-  const startedAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
-  const { workerDir } = await writeRunState(tmp, { runId: 'run_headless', runner: 'headless', startedAt });
-  await fsp.writeFile(path.join(workerDir, 'stderr.log'), 'Waiting for password.\n');
-  const old = new Date(Date.now() - 8 * 60 * 1000);
-  await fsp.utimes(path.join(workerDir, 'stderr.log'), old, old);
-
-  const state = await refreshRun('run_headless');
-  assert.equal(state.tasks[0].attentionHint, null);
+  const state = await refreshRun('run_keyword_tmux_no_hint');
+  assert.equal(state.tasks[0].attentionHint, undefined);
 });

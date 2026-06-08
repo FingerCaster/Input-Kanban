@@ -7,32 +7,28 @@ import {
   pathForRun, roleDir, safeIdPart, RUNNER
 } from './utils.js';
 import { matchThreadToMarkers } from './appServerClient.js';
+import { formatCodexEventsJsonl } from './eventFormatter.js';
 import { defaultRunner } from './runners/index.js';
 
 const runner = defaultRunner;
-const ATTENTION_IDLE_MS = 5 * 60 * 1000;
-const ATTENTION_MIN_RUNTIME_MS = 10 * 60 * 1000;
-const ATTENTION_KEYWORDS = [
-  'permission',
-  'approval',
-  'approve',
-  'confirm',
-  'continue',
-  'password',
-  'authentication',
-  'authenticate'
-];
+const VALID_SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
+
+function normalizeSandbox(value, fallback = 'workspace-write') {
+  const sandbox = String(value || '').trim();
+  if (VALID_SANDBOXES.has(sandbox)) return sandbox;
+  return fallback;
+}
 
 function statePath(runDir) { return path.join(runDir, 'run_state.json'); }
 function planPath(runDir) { return path.join(runDir, 'plan.json'); }
 
-export async function createRun({ label = 'task', taskText = '', repo = DEFAULT_REPO, maxParallel = 3 } = {}) {
+export async function createRun({ label = 'task', taskText = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write' } = {}) {
   const runId = makeRunId(label);
   const runDir = pathForRun(runId);
   await ensureDir(runDir);
   await fsp.writeFile(path.join(runDir, 'task.md'), taskText || '');
   const state = {
-    runId, label, repo: path.resolve(repo), maxParallel: Number(maxParallel) || 3,
+    runId, label, repo: path.resolve(repo), maxParallel: Number(maxParallel) || 3, workerSandbox: normalizeSandbox(workerSandbox),
     runner: RUNNER,
     status: 'created', createdAt: nowIso(), updatedAt: nowIso(),
     planner: { status: 'pending' }, batches: [], tasks: [], judge: { status: 'pending' }
@@ -87,7 +83,7 @@ Preferred schema with blocking batches:
           "id": "T-01",
           "name": "short name",
           "prompt": "complete worker prompt",
-          "sandbox": "workspace-write",
+          "sandbox": "${state.workerSandbox || 'workspace-write'}",
           "expectedArtifacts": []
         }
       ]
@@ -103,7 +99,7 @@ Backward-compatible schema also accepted:
       "id": "T-01",
       "name": "short name",
       "prompt": "complete worker prompt",
-      "sandbox": "workspace-write",
+      "sandbox": "${state.workerSandbox || 'workspace-write'}",
       "expectedArtifacts": []
     }
   ]
@@ -114,6 +110,7 @@ Rules:
 - Use batch maxParallel to express whether tasks in the same batch may run concurrently or serially.
 - Keep tasks scoped and independently executable.
 - Include exact output/artifact expectations in each worker prompt.
+- Default worker sandbox for this run is ${state.workerSandbox || 'workspace-write'}; use that sandbox unless a task has a specific safety reason to be stricter.
 - If the input already contains task sections, preserve their ids when practical.
 
 User task:
@@ -163,7 +160,7 @@ export async function startPlanner(runId) {
   await fsp.rm(planPath(runDir), { force: true });
   const taskText = await fsp.readFile(path.join(runDir, 'task.md'), 'utf8');
   const prompt = defaultPlannerPrompt(state, taskText);
-  const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', prompt, sandbox: 'read-only', cwd: state.repo, outDir });
+  const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: state.repo, outDir });
   state.status = 'planning';
   state.planner = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir, attempt: (state.plannerAttempts?.length || 0) + 1 };
   await saveRun(state);
@@ -180,14 +177,14 @@ export async function startPlanner(runId) {
   return state;
 }
 
-function normalizeTask(t, i, batch) {
+function normalizeTask(t, i, batch, defaultSandbox = 'workspace-write') {
   const id = safeIdPart(t.id || `T-${String(i + 1).padStart(2, '0')}`);
   return {
     id,
     batchId: batch.id,
     name: t.name || t.id || `Task ${i + 1}`,
     prompt: t.prompt || t.instructions || '',
-    sandbox: t.sandbox || 'workspace-write',
+    sandbox: normalizeSandbox(t.sandbox, defaultSandbox),
     expectedArtifacts: Array.isArray(t.expectedArtifacts) ? t.expectedArtifacts : [],
     status: 'pending'
   };
@@ -220,7 +217,7 @@ async function rotatePlannerAttempt(state, runDir) {
   }];
 }
 
-function normalizePlan(plan, defaultMaxParallel) {
+function normalizePlan(plan, defaultMaxParallel, defaultSandbox = 'workspace-write') {
   if (Array.isArray(plan.batches)) {
     const batches = plan.batches.map((b, bi) => {
       const batch = {
@@ -230,14 +227,14 @@ function normalizePlan(plan, defaultMaxParallel) {
         status: 'pending',
         tasks: []
       };
-      batch.tasks = (Array.isArray(b.tasks) ? b.tasks : []).map((t, ti) => normalizeTask(t, ti, batch));
+      batch.tasks = (Array.isArray(b.tasks) ? b.tasks : []).map((t, ti) => normalizeTask(t, ti, batch, defaultSandbox));
       return batch;
     }).filter(b => b.tasks.length);
     return { ...plan, batches, tasks: batches.flatMap(b => b.tasks) };
   }
   if (Array.isArray(plan.tasks)) {
     const batch = { id: 'batch-1', name: '默认批次', maxParallel: Math.max(1, Number(defaultMaxParallel) || 1), status: 'pending', tasks: [] };
-    batch.tasks = plan.tasks.map((t, i) => normalizeTask(t, i, batch));
+    batch.tasks = plan.tasks.map((t, i) => normalizeTask(t, i, batch, defaultSandbox));
     return { ...plan, batches: [batch], tasks: batch.tasks };
   }
   return null;
@@ -253,7 +250,7 @@ async function materializePlan(state) {
     state.tasks = [];
     return { ok: false, empty: false, error: state.planner.planParseError };
   }
-  const normalized = normalizePlan(plan, state.maxParallel);
+  const normalized = normalizePlan(plan, state.maxParallel, state.workerSandbox || 'workspace-write');
   if (!normalized || !Array.isArray(normalized.tasks)) {
     state.planner.planParseError = 'planner JSON did not contain { batches: [...] } or { tasks: [...] }';
     state.batches = [];
@@ -299,7 +296,7 @@ ORCHESTRATOR_BATCH_ID: ${task.batchId || 'batch-1'}
 
 ${task.prompt}
 `;
-  const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, prompt: fullPrompt, sandbox: task.sandbox || 'workspace-write', cwd: state.repo, outDir });
+  const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, batchId: task.batchId || 'batch-1', runStatePath: statePath(runDir), prompt: fullPrompt, sandbox: task.sandbox || state.workerSandbox || 'workspace-write', cwd: state.repo, outDir });
   Object.assign(task, { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir });
 }
 
@@ -390,7 +387,7 @@ export async function startJudge(runId) {
   const judgeInput = await buildJudgeInput(state);
   await writeJsonAtomic(judgeInputPath, judgeInput);
   const prompt = defaultJudgePrompt(state, judgeInputPath);
-  const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', prompt, sandbox: 'read-only', cwd: state.repo, outDir });
+  const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(pathForRun(runId)), prompt, sandbox: 'read-only', cwd: state.repo, outDir });
   state.judge = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir };
   state.status = 'judging';
   await saveRun(state);
@@ -419,6 +416,7 @@ async function loadAndRefreshRun(runId, appClient = null, { light = false } = {}
   for (const task of state.tasks || []) await refreshTask(state, task);
   await refreshRole(state, state.judge, roleDir(pathForRun(runId), 'judge'));
   await recoverCompletedJudge(state);
+  aggregateRunTmuxMetadata(state);
   recomputeRunStatus(state);
   await scheduleMoreWorkers(state);
   recomputeRunStatus(state);
@@ -463,7 +461,6 @@ async function refreshRole(state, roleState, dir) {
   else if (roleState.status === 'running' && !runner.hasRunning(state.runId, key)) roleState.status = 'unknown';
   roleState.files = await standardFiles(dir);
   await attachTmuxMetadata(roleState, dir);
-  roleState.attentionHint = await buildAttentionHint({ state, target: roleState, dir });
 }
 
 async function refreshTask(state, task) {
@@ -478,7 +475,7 @@ async function refreshTask(state, task) {
   } else if (task.status === 'running' && !runner.hasRunning(state.runId, task.id)) task.status = 'unknown';
   task.files = await standardFiles(dir);
   await attachTmuxMetadata(task, dir);
-  task.attentionHint = await buildAttentionHint({ state, target: task, dir });
+  delete task.attentionHint;
   task.artifacts = [];
   for (const rel of task.expectedArtifacts || []) task.artifacts.push({ path: rel, ...(await fileInfo(path.isAbsolute(rel) ? rel : path.join(state.repo, rel))) });
   const batch = (state.batches || []).find(b => b.id === task.batchId);
@@ -494,60 +491,65 @@ async function attachTmuxMetadata(target, dir) {
     delete target.tmux;
     return;
   }
+  if (raw.ready !== true) {
+    target.tmux = {
+      runner: 'tmux',
+      ready: false,
+      status: raw.status || 'pending',
+      sessionName: raw.sessionName || '',
+      windowName: raw.windowName || '',
+      target: raw.target || '',
+      runScript: raw.runScript || '',
+      startedAt: raw.startedAt || '',
+      error: raw.error || ''
+    };
+    return;
+  }
   const selectWindowCommand = raw.selectWindowCommand || raw.selectCommand || '';
   target.tmux = {
     runner: 'tmux',
+    ready: true,
+    status: raw.status || 'ready',
     sessionName: raw.sessionName || '',
     windowName: raw.windowName || '',
     target: raw.target || '',
     attachCommand: raw.attachCommand || '',
     selectWindowCommand,
     runScript: raw.runScript || '',
-    startedAt: raw.startedAt || ''
+    startedAt: raw.startedAt || '',
+    readyAt: raw.readyAt || ''
   };
 }
 
-async function buildAttentionHint({ state, target, dir }) {
-  if (!['running', 'unknown'].includes(target?.status) || state?.status === 'stopped') return null;
-  if ((state?.runner || RUNNER) !== 'tmux' && !target.tmux) return null;
-  const reasons = [];
-  const textTail = [
-    await readTextMaybe(path.join(dir, 'stderr.log'), 20000),
-    await readTextMaybe(path.join(dir, 'events.jsonl'), 20000)
-  ].join('\n');
-  const keyword = findAttentionKeyword(textTail);
-  if (keyword) reasons.push(`log tail contains "${keyword}"`);
-  const idle = taskIdleSnapshot(target);
-  if (idle.isLongIdle || (target.status === 'unknown' && idle.isIdle)) reasons.push(`no recent log updates for ${Math.round(idle.idleMs / 1000)}s`);
-  if (!reasons.length) return null;
-  return {
-    message: 'This task may need manual intervention; attach to tmux to inspect.',
-    reasons,
-    attachCommand: target.tmux?.attachCommand || '',
-    detectedAt: nowIso()
+function aggregateRunTmuxMetadata(state) {
+  const roles = [state.planner, ...(state.tasks || []), state.judge].filter(Boolean);
+  const entries = roles.map(role => role.tmux).filter(tmux => tmux?.runner === 'tmux');
+  const readyEntries = entries.filter(tmux => tmux.ready === true);
+  if (!entries.length) {
+    if ((state.runner || RUNNER) === 'tmux') {
+      state.tmux = {
+        runner: 'tmux',
+        hasTmuxSession: false
+      };
+    } else {
+      delete state.tmux;
+    }
+    return;
+  }
+  const withSession = readyEntries.find(tmux => tmux.sessionName || tmux.target || tmux.windowName);
+  if (!withSession) {
+    state.tmux = {
+      runner: 'tmux',
+      hasTmuxSession: false
+    };
+    return;
+  }
+  state.tmux = {
+    runner: 'tmux',
+    hasTmuxSession: true,
+    tmuxSessionName: withSession.sessionName || ''
   };
-}
-
-function findAttentionKeyword(text) {
-  const lower = String(text || '').toLowerCase();
-  return ATTENTION_KEYWORDS.find(keyword => lower.includes(keyword)) || null;
-}
-
-function taskIdleSnapshot(target) {
-  const now = Date.now();
-  const startedMs = Date.parse(target?.startedAt || '');
-  const runtimeMs = Number.isFinite(startedMs) ? now - startedMs : 0;
-  const recentMs = [target?.files?.events, target?.files?.stderr, target?.files?.lastMessage]
-    .filter(info => info?.exists && Number.isFinite(info.mtimeMs))
-    .map(info => info.mtimeMs)
-    .sort((a, b) => b - a)[0];
-  const idleMs = Number.isFinite(recentMs) ? now - recentMs : runtimeMs;
-  return {
-    idleMs,
-    runtimeMs,
-    isIdle: idleMs >= ATTENTION_IDLE_MS,
-    isLongIdle: runtimeMs >= ATTENTION_MIN_RUNTIME_MS && idleMs >= ATTENTION_IDLE_MS
-  };
+  if (withSession.attachCommand) state.tmux.tmuxAttachCommand = withSession.attachCommand;
 }
 
 async function standardFiles(dir) {
@@ -665,7 +667,8 @@ async function buildJudgeInput(state) {
       runner: state.runner || RUNNER,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
-      maxParallel: state.maxParallel
+      maxParallel: state.maxParallel,
+      workerSandbox: state.workerSandbox || 'workspace-write'
     },
     taskText,
     plan,
@@ -714,88 +717,8 @@ async function enrichFromAppServer(state, appClient) {
 
 function summaryOfRun(s) {
   const tasks = s.tasks || [];
-  return { runId: s.runId, label: s.label, repo: s.repo, status: s.status, runner: s.runner || RUNNER, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
+  return { runId: s.runId, label: s.label, repo: s.repo, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
 }
-
-function formatCodexEventsJsonl(text) {
-  if (!text.trim()) return '暂无事件日志。';
-  const lines = text.split(/\r?\n/).filter(Boolean);
-  return lines.map((line, index) => {
-    const seq = String(index + 1).padStart(3, '0');
-    let event;
-    try { event = JSON.parse(line); }
-    catch { return `[${seq}] 无法解析事件\n${line}`; }
-    return formatCodexEvent(seq, event);
-  }).join('\n\n');
-}
-
-function formatCodexEvent(seq, event) {
-  switch (event.type) {
-    case 'thread.started':
-      return `[${seq}] Codex 会话开始\n  会话ID: ${event.thread_id || '-'}`;
-    case 'turn.started':
-      return `[${seq}] 回合开始`;
-    case 'turn.completed':
-      return `[${seq}] 回合完成\n${formatKnownFields(event, ['status', 'error', 'usage'])}`.trimEnd();
-    case 'item.started':
-      return formatCodexItem(seq, '开始', event.item);
-    case 'item.completed':
-      return formatCodexItem(seq, '完成', event.item);
-    case 'error':
-      return `[${seq}] 错误\n${formatJson(event)}`;
-    default:
-      return `[${seq}] ${event.type || '未知事件'}\n${formatJson(event)}`;
-  }
-}
-
-function formatCodexItem(seq, action, item = {}) {
-  const type = item.type || 'unknown';
-  const title = `[${seq}] ${action}: ${displayItemType(type)}`;
-  if (type === 'command_execution') {
-    const parts = [title];
-    if (item.command) parts.push(`  命令: ${item.command}`);
-    if (item.status) parts.push(`  状态: ${item.status}`);
-    if (item.exit_code !== undefined && item.exit_code !== null) parts.push(`  退出码: ${item.exit_code}`);
-    if (item.aggregated_output) parts.push(`  输出:\n${indentText(truncateText(item.aggregated_output))}`);
-    return parts.join('\n');
-  }
-  if (type === 'agent_message' || type === 'agentMessage') {
-    const text = item.text || item.message || item.content || '';
-    return text ? `${title}\n  内容:\n${indentText(truncateText(String(text)))}` : title;
-  }
-  if (type === 'reasoning') {
-    const summary = item.summary || item.content || '';
-    return summary ? `${title}\n  摘要:\n${indentText(truncateText(Array.isArray(summary) ? summary.join('\n') : String(summary)))}` : title;
-  }
-  if (type === 'file_change' || type === 'fileChange') {
-    return `${title}\n${formatKnownFields(item, ['status', 'path', 'changes'])}`.trimEnd();
-  }
-  return `${title}\n${formatJson(item)}`;
-}
-
-function displayItemType(type) {
-  return {
-    command_execution: '命令执行',
-    agent_message: '模型回复',
-    agentMessage: '模型回复',
-    reasoning: '推理',
-    file_change: '文件变更',
-    fileChange: '文件变更',
-    mcp_tool_call: 'MCP 工具调用',
-    mcpToolCall: 'MCP 工具调用'
-  }[type] || type;
-}
-
-function formatKnownFields(obj, fields) {
-  return fields
-    .filter(field => obj[field] !== undefined && obj[field] !== null)
-    .map(field => `  ${field}: ${typeof obj[field] === 'string' ? obj[field] : JSON.stringify(obj[field], null, 2)}`)
-    .join('\n');
-}
-
-function formatJson(value) { return indentText(JSON.stringify(value, null, 2)); }
-function indentText(text) { return String(text).split('\n').map(line => `  ${line}`).join('\n'); }
-function truncateText(text, max = 12000) { return text.length > max ? `${text.slice(0, max)}\n...<已截断 ${text.length - max} 字符>` : text; }
 
 export async function readRunTaskText(runId) {
   return await readTextMaybe(path.join(pathForRun(runId), 'task.md'), 1000000);

@@ -30,16 +30,13 @@
     th:nth-child(2), td:nth-child(2) { width: 92px; white-space: nowrap; }
     th:nth-child(3), td:nth-child(3) { width: 132px; }
     th:nth-child(4), td:nth-child(4) { width: 64px; white-space: nowrap; }
-    th:nth-child(5), td:nth-child(5) { width: 70px; }
-    th:nth-child(6), td:nth-child(6) { width: 58px; }
-    th:nth-child(8), td:nth-child(8) { width: 118px; }
-    th:nth-child(9), td:nth-child(9) { width: 66px; }
-    th:nth-child(10), td:nth-child(10) { width: 94px; }
+    th:nth-child(5), td:nth-child(5) { width: 96px; }
+    th:nth-child(6), td:nth-child(6) { width: 92px; }
+    th:nth-child(7), td:nth-child(7) { width: 66px; }
+    th:nth-child(8), td:nth-child(8) { width: 94px; }
     th { color: #cbd5e1; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
     tr:hover { background: #162033; cursor: pointer; }
     .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: var(--gray); line-height: 1.3; }
-    .attention-hint { display: block; margin-top: 6px; color: #fbbf24; font-size: 12px; font-weight: 700; white-space: normal; line-height: 1.35; }
-    .attention-hint code { color: #fde68a; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; }
     .completed, .judged, .workers_completed, .planned, .batches_completed { background: var(--green); }
     .running, .planning, .judging { background: var(--blue); }
     .failed, .workers_failed, .plan_failed, .judge_failed, .unknown, .batch_blocked { background: var(--red); }
@@ -68,22 +65,25 @@
     .run-card-progress { margin-top: 8px; display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
     .build-header { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel-2); margin-bottom: 14px; }
     .build-title { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 900; }
-    .build-meta { margin-top: 6px; color: var(--muted); word-break: break-all; }
+    .build-meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+    .meta-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; background: #020617; color: #cbd5e1; font-size: 12px; line-height: 1.2; }
+    .meta-chip.danger { border-color: #f97316; color: #fed7aa; background: rgba(180,83,9,.14); }
+    .meta-label { color: var(--muted); font-weight: 800; white-space: nowrap; }
+    .meta-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .meta-chip.long .meta-value { max-width: min(680px, 72vw); }
+    .meta-chip .copy-btn { margin-left: 2px; }
     .log-panel { margin-top: 16px; }
     .file-tabs button { font-size: 13px; }
     .copy-btn { padding: 2px 6px; margin: 0 0 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.2; background: var(--gray); vertical-align: middle; }
     .session-cell { word-break: break-all; }
+    .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+    .row-actions .danger, .row-actions .secondary { margin: 0; }
+    .status-stack { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 5px; }
     .execution-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 -2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px 10px 0 0; background: #020617; color: var(--muted); font-size: 12px; }
     .execution-summary.hidden { display: none; }
     .execution-summary + pre { border-top-left-radius: 0; border-top-right-radius: 0; }
     .notice { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #1f2937; color: #cbd5e1; }
     .notice.warning { border-color: #92400e; background: rgba(180,83,9,.18); }
-    .tmux-box { margin: 8px 0 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #020617; color: #cbd5e1; font-size: 12px; }
-    .tmux-box.hidden { display: none; }
-    .tmux-box-title { font-weight: 800; color: var(--text); margin-bottom: 5px; }
-    .tmux-actions { margin-top: 7px; display: flex; flex-wrap: wrap; gap: 4px; }
-    .tmux-actions button { margin: 0; }
-    .tmux-inline { display: block; margin-top: 3px; word-break: break-all; }
     .file-content-wrap { position: relative; }
     .floating-copy-btn { position: absolute; top: 8px; left: 8px; z-index: 2; opacity: 0; pointer-events: none; transition: opacity .15s; padding: 5px 8px; background: rgba(71,85,105,.92); }
     .file-content-wrap:hover .floating-copy-btn:not(.hidden), .floating-copy-btn:focus { opacity: 1; pointer-events: auto; }
@@ -110,6 +110,12 @@
       <label>目标仓库</label><input id="repo" />
       <label>运行目录</label><input id="runsDir" readonly />
       <label>最大并发数</label><input id="maxParallel" type="number" value="3" min="1" max="16" />
+      <label>Worker 沙箱</label><select id="workerSandbox">
+        <option value="workspace-write" selected>workspace-write（默认，允许写当前仓库）</option>
+        <option value="read-only">read-only（只读）</option>
+        <option value="danger-full-access">danger-full-access（高风险，跳过沙箱限制）</option>
+      </select>
+      <div class="muted">仅影响 worker；任务拆分和汇总验收仍保持 read-only。</div>
       <label>任务说明</label><textarea id="taskText" placeholder="粘贴任务说明"></textarea>
       <div class="toolbar">
         <button onclick="createRun()">创建批次</button>
@@ -121,7 +127,7 @@
       <h2>批次详情</h2>
       <div class="build-header">
         <div id="selected" class="muted">未选择任务批次</div>
-        <div id="autoRefreshHint" class="muted">自动刷新：未启动</div>
+        <div id="autoRefreshHint" class="muted hidden">自动刷新：未启动</div>
         <div id="runNotice" class="notice warning hidden"></div>
         <div class="toolbar">
           <button onclick="planRun()">拆分任务</button>
@@ -140,20 +146,8 @@
     <section id="filePanel" class="log-panel">
       <h2>文件查看</h2>
       <div id="fileTitle" class="muted">点击任务后选择文件</div>
-      <div class="toolbar file-tabs">
-        <button class="secondary" onclick="loadFile('prompt.md')">提示词</button>
-        <button class="secondary" onclick="loadFile('events.jsonl')">事件日志</button>
-        <button class="secondary" onclick="loadFile('events.pretty')">执行过程</button>
-        <button class="secondary" onclick="loadFile('stderr.log')">错误日志</button>
-        <button class="secondary" onclick="loadFile('last_message.md')">最终回复</button>
-        <button class="secondary" onclick="loadFile('exit_code')">退出码</button>
-        <button class="secondary" onclick="loadFile('result.json')">结果</button>
-        <button class="secondary" onclick="loadFile('evidence.json')">证据</button>
-        <button class="secondary" onclick="loadFile('judge_input.json')">验收输入</button>
-        <button class="secondary" onclick="loadFile('verdict.json')">验收结论</button>
-      </div>
+      <div id="fileTabs" class="toolbar file-tabs"></div>
       <div id="executionSummary" class="execution-summary hidden"></div>
-      <div id="tmuxPanel" class="tmux-box hidden"></div>
       <div class="file-content-wrap">
         <button id="copyLastMessageBtn" class="secondary copy-btn floating-copy-btn hidden" title="复制最终回复内容" onclick="copyFileContent(event)">⧉</button>
         <pre id="fileContent"></pre>
@@ -169,6 +163,7 @@ let currentState = null;
 let lastAutoRefreshAt = null;
 let runListVisibleCount = 10;
 let latestRuns = [];
+const statusByRunId = new Map();
 const AUTO_REFRESH_MS = 3000;
 const RUN_LIST_PAGE_SIZE = 10;
 
@@ -201,13 +196,57 @@ function durationSeconds(start, end) {
   const endMs = end ? new Date(end).getTime() : Date.now();
   return Math.max(0, Math.round((endMs - new Date(start).getTime()) / 1000));
 }
-function runTimingText(s) { return `开始时刻 ${formatDateTime(s.createdAt)}｜用时 ${durationSeconds(s.createdAt, s.updatedAt)} 秒`; }
+function maxIsoTime(values) {
+  const times = values.map(value => Date.parse(value || '')).filter(Number.isFinite);
+  if (!times.length) return null;
+  return new Date(Math.max(...times)).toISOString();
+}
+function runDurationEnd(s) {
+  if (!s) return null;
+  const terminalStatuses = new Set(['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped']);
+  if (!terminalStatuses.has(s.status)) return null;
+  return maxIsoTime([
+    s.stoppedAt,
+    s.stopInfo?.stoppedAt,
+    s.judge?.endedAt,
+    s.planner?.endedAt,
+    ...(s.tasks || []).flatMap(task => [task.endedAt, task.completedAt, task.stoppedAt])
+  ]) || s.updatedAt;
+}
+function runTimingText(s) { return `开始时刻 ${formatDateTime(s.createdAt)}｜用时 ${durationSeconds(s.createdAt, runDurationEnd(s))} 秒`; }
+function basenamePath(value) {
+  const parts = String(value || '').split(/[\\/]/).filter(Boolean);
+  return parts.at(-1) || value || '-';
+}
+function metaChip(label, value, { title = value, danger = false, long = false, extra = '' } = {}) {
+  return `<span class="meta-chip ${danger ? 'danger' : ''} ${long ? 'long' : ''}" title="${esc(title)}"><span class="meta-label">${esc(label)}</span><span class="meta-value">${esc(value)}</span>${extra}</span>`;
+}
 function isTmuxMode() { return currentState?.runner === 'tmux'; }
 function taskById(id) {
   if (!currentState) return null;
   if (id === 'planner') return currentState.planner;
   if (id === 'judge') return currentState.judge;
   return (currentState.tasks || []).find(t => t.id === id) || null;
+}
+function tmuxSessionName(state = currentState) {
+  return state?.tmux?.tmuxSessionName || state?.tmux?.sessionName || (state?.runId ? `input-kanban-${state.runId}` : '');
+}
+function hasRunTmuxMetadata(state = currentState) {
+  if (!state || state.runner !== 'tmux') return false;
+  if (state.tmux?.hasTmuxSession || state.tmux?.tmuxSessionName || state.tmux?.tmuxAttachCommand) return true;
+  const roles = [state.planner, ...(state.tasks || []), state.judge];
+  return roles.some(role => role?.tmux?.ready === true && (role.tmux.sessionName || role.tmux.windowName || role.tmux.target));
+}
+function runAttachCommand(state = currentState) {
+  if (!hasRunTmuxMetadata(state)) return '';
+  return state?.tmux?.tmuxAttachCommand || `tmux attach-session -t ${tmuxSessionName(state)}`;
+}
+function runListHasTmuxMetadata(run) {
+  if (run?.runner !== 'tmux') return false;
+  if (selectedRun === run.runId && currentState?.runId === run.runId) return hasRunTmuxMetadata(currentState);
+  const cached = statusByRunId.get(run.runId);
+  if (cached) return hasRunTmuxMetadata(cached);
+  return !!(run?.tmux?.hasTmuxSession || run?.tmux?.tmuxSessionName || run?.tmux?.tmuxAttachCommand);
 }
 
 async function loadHealth() {
@@ -228,7 +267,7 @@ function hideCreateForm() {
   document.getElementById('filePanel').classList.remove('hidden');
 }
 async function createRun() {
-  const body = { label: label.value, repo: repo.value, maxParallel: maxParallel.value, taskText: taskText.value };
+  const body = { label: label.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, taskText: taskText.value };
   const r = await api('/api/runs', { method: 'POST', body: JSON.stringify(body) });
   selectedRun = r.runId; selectedTask = null; selectedFileName = null;
   clearFileView();
@@ -244,7 +283,7 @@ function renderRunList() {
   const visibleRuns = latestRuns.slice(0, runListVisibleCount);
   const cards = visibleRuns.map(r => `
     <div class="run-card ${selectedRun === r.runId ? 'active' : ''}" onclick="selectRun('${r.runId}')">
-      <div class="run-card-title"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span>${pill(r.status)}</div>
+      <div class="run-card-title"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><span>${pill(r.status)}</span></div>
       <div class="run-card-id muted">${esc(r.runId)}</div>
       <div class="run-card-created">创建 ${esc(formatDateTime(r.createdAt))}</div>
       <div class="run-card-progress"><span>进度 ${r.completed}/${r.total}</span><span>执行中 ${r.running}｜失败 ${r.failed}</span></div>
@@ -262,13 +301,38 @@ async function selectRun(id) { selectedRun = id; selectedTask = null; selectedFi
 async function refreshSelected({auto=false} = {}) {
   if (!selectedRun) return;
   currentState = await api(`/api/runs/${selectedRun}/status`);
+  statusByRunId.set(selectedRun, currentState);
   if (auto) lastAutoRefreshAt = new Date();
-  document.getElementById('selected').innerHTML = `<div class="build-title"><span>${esc(currentState.label)}</span>${pill(currentState.status)}</div><div class="build-meta">${esc(currentState.runId)}｜仓库=${esc(currentState.repo)}<br>${esc(runTimingText(currentState))}</div>`;
+  document.getElementById('selected').innerHTML = renderSelectedHeader();
   updateAutoRefreshHint();
   updateRunNotice();
   await loadTaskDescription();
   renderTasks(); await refreshRuns();
   if (selectedTask && selectedFileName) await loadFile(selectedFileName, { preserveScroll: true });
+}
+function renderSelectedHeader() {
+  if (!currentState) return '<div class="muted">未选择任务批次</div>';
+  const sandbox = currentState.workerSandbox || 'workspace-write';
+  const chips = [
+    metaChip('Run ID', currentState.runId, { long: true }),
+    metaChip('仓库', basenamePath(currentState.repo), { title: currentState.repo }),
+    metaChip('沙箱', sandbox, { danger: sandbox === 'danger-full-access' }),
+    metaChip('开始', formatDateTime(currentState.createdAt)),
+    metaChip('用时', `${durationSeconds(currentState.createdAt, runDurationEnd(currentState))} 秒`)
+  ];
+  if (currentState.runner === 'tmux') {
+    if (hasRunTmuxMetadata(currentState)) {
+      chips.push(metaChip('终端', tmuxSessionName(currentState), {
+        long: true,
+        extra: `<button class="secondary copy-btn" onclick="copyTmuxRunCommand(event)">复制tmux attach指令</button>`
+      }));
+    } else {
+      chips.push(metaChip('终端', 'tmux 现场尚未生成'));
+    }
+  }
+  chips.push(metaChip('刷新', `每 ${AUTO_REFRESH_MS / 1000} 秒`));
+  chips.push(metaChip('上次', lastAutoRefreshAt ? lastAutoRefreshAt.toLocaleTimeString() : '尚未触发'));
+  return `<div class="build-title"><span>${esc(currentState.label)}</span>${pill(currentState.status)}</div><div class="build-meta">${chips.join('')}</div>`;
 }
 async function loadTaskDescription() {
   if (!selectedRun) { document.getElementById('taskDescription').textContent = '未选择任务批次'; return; }
@@ -307,16 +371,9 @@ function updateAutoRefreshHint() {
 function taskStatusCell(t) {
   if (t?.manualCompletion) {
     const original = t.originalStatus || t.manualCompletion.originalStatus || t.manualCompletion.previousStatus || 'unknown';
-    return `${pill(original)} <span class="pill completed">手动标记成功已完成</span>`;
+    return `<span class="status-stack">${pill(original)}<span class="pill completed">手动标记成功已完成</span></span>`;
   }
-  const hint = attentionHintCell(t);
-  return `${pill(t?.status)}${hint}`;
-}
-function attentionHintCell(t) {
-  if (!t?.attentionHint) return '';
-  const command = t.attentionHint.attachCommand ? ` <code>${esc(t.attentionHint.attachCommand)}</code>` : '';
-  const reasons = Array.isArray(t.attentionHint.reasons) && t.attentionHint.reasons.length ? `｜${esc(t.attentionHint.reasons.join(' / '))}` : '';
-  return `<span class="attention-hint" title="${esc(t.attentionHint.message || '')}">可能需要人工介入；请 attach tmux 检查。${command}${reasons}</span>`;
+  return pill(t?.status);
 }
 function taskActionCell(id, t) {
   if (!t || id === 'planner' || id === 'judge') return '-';
@@ -324,16 +381,13 @@ function taskActionCell(id, t) {
   if (!['unknown', 'failed'].includes(t.status)) return '-';
   return `<button class="danger" onclick="markTaskCompleted(event, '${id}')">手动标记成功</button>`;
 }
+function shortSessionId(thread) {
+  const text = String(thread || '');
+  return text.length > 8 ? text.slice(-8) : text;
+}
 function sessionCell(thread) {
   if (!thread) return '-';
-  return `<span class="session-cell">${esc(thread)}</span><button class="copy-btn" title="复制 Codex 会话ID" onclick="copySessionId(event, '${esc(thread)}')">⧉</button>`;
-}
-function tmuxCell(t) {
-  if (!isTmuxMode()) return '-';
-  const tmux = t?.tmux;
-  if (!tmux) return '<span class="muted">未启动终端</span>';
-  const label = tmux.windowName || tmux.target || 'tmux';
-  return `<span class="session-cell" title="${esc(tmux.target || '')}">${esc(label)}</span>`;
+  return `<span class="session-cell" title="${esc(thread)}">…${esc(shortSessionId(thread))}</span><button class="copy-btn" title="复制完整 Codex 会话ID" onclick="copySessionId(event, '${esc(thread)}')">⧉</button>`;
 }
 function taskStartedCell(t) {
   return t?.startedAt ? formatDateTime(t.startedAt) : '-';
@@ -343,29 +397,67 @@ function taskDurationCell(t) {
   const end = t.endedAt || t.completedAt || t.stoppedAt || (t.status === 'running' ? null : t.updatedAt);
   return `${durationSeconds(t.startedAt, end)} 秒`;
 }
+function processExitCell(t) {
+  return `${esc(t?.pid || '-')} / ${esc(t?.exitCode ?? '-')}`;
+}
+function taskActionInfoCell(id, t) {
+  return `<div class="row-actions">${taskActionCell(id, t)}</div>`;
+}
 function taskRow(id, role, t) {
   const thread = t?.codexThread?.id || '';
-  return `<tr class="job-row ${selectedTask === id ? 'selected' : ''}" onclick="selectTask('${id}')"><td><b class="task-name" title="${esc(id)}">${esc(id)}</b><span class="muted task-role">${esc(displayRole(role))}</span></td><td>${taskStatusCell(t)}</td><td>${esc(taskStartedCell(t))}</td><td>${esc(taskDurationCell(t))}</td><td>${esc(t?.pid || '-')}</td><td>${esc(t?.exitCode ?? '-')}</td><td>${sessionCell(thread)}</td><td>${tmuxCell(t)}</td><td>${esc(t?.files?.lastMessage?.exists ? '有' : '-')}</td><td>${taskActionCell(id, t)}</td></tr>`;
+  return `<tr class="job-row ${selectedTask === id ? 'selected' : ''}" onclick="selectTask('${id}')"><td><b class="task-name" title="${esc(id)}">${esc(id)}</b><span class="muted task-role">${esc(displayRole(role))}</span></td><td>${taskStatusCell(t)}</td><td>${esc(taskStartedCell(t))}</td><td>${esc(taskDurationCell(t))}</td><td>${processExitCell(t)}</td><td>${sessionCell(thread)}</td><td>${esc(t?.files?.lastMessage?.exists ? '有' : '-')}</td><td>${taskActionInfoCell(id, t)}</td></tr>`;
 }
 function renderTasks() {
   const s = currentState;
   const rows = [taskRow('planner','planner',s.planner)];
+  const columnCount = 8;
   if (Array.isArray(s.batches) && s.batches.length) {
     for (const b of s.batches) {
       const done = (b.tasks || []).filter(t => t.status === 'completed').length;
-      rows.push(`<tr class="batch-row"><td colspan="10">${esc(b.name || b.id)} ${pill(b.status)} <span class="muted">${esc(b.id)}｜最大并发 ${esc(b.maxParallel || '-')}｜${done}/${(b.tasks || []).length}</span></td></tr>`);
+      rows.push(`<tr class="batch-row"><td colspan="${columnCount}">${esc(b.name || b.id)} ${pill(b.status)} <span class="muted">${esc(b.id)}｜最大并发 ${esc(b.maxParallel || '-')}｜${done}/${(b.tasks || []).length}</span></td></tr>`);
       for (const t of b.tasks || []) rows.push(taskRow(t.id, t.name, t));
     }
   } else rows.push(...(s.tasks||[]).map(t => taskRow(t.id, t.name, t)));
   rows.push(taskRow('judge','最终验收',s.judge));
-  document.getElementById('tasks').innerHTML = `<table><tr><th>任务</th><th>状态</th><th>发起时间</th><th>用时</th><th>进程号</th><th>退出码</th><th>Codex 会话ID</th><th>终端</th><th>最终回复</th><th>操作</th></tr>${rows.join('')}</table>`;
+  document.getElementById('tasks').innerHTML = `<table><tr><th>任务</th><th>状态</th><th>发起时间</th><th>用时</th><th>进程号/退出码</th><th>Codex 会话ID</th><th>最终回复</th><th>操作</th></tr>${rows.join('')}</table>`;
+}
+const FILE_TAB_SETS = {
+  planner: [
+    ['last_message.md', '最终回复'], ['events.pretty', '执行过程'], ['stderr.log', '错误日志'], ['prompt.md', '提示词'], ['events.jsonl', '事件日志']
+  ],
+  worker: [
+    ['events.pretty', '执行过程'], ['last_message.md', '最终回复'], ['stderr.log', '错误日志'], ['prompt.md', '提示词'], ['result.json', '结果'], ['evidence.json', '证据'], ['events.jsonl', '事件日志']
+  ],
+  judge: [
+    ['verdict.json', '验收结论'], ['judge_input.json', '验收输入'], ['last_message.md', '最终回复'], ['events.pretty', '执行过程'], ['stderr.log', '错误日志'], ['prompt.md', '提示词'], ['events.jsonl', '事件日志']
+  ]
+};
+function roleForSelectedTask() {
+  if (selectedTask === 'planner') return 'planner';
+  if (selectedTask === 'judge') return 'judge';
+  return selectedTask ? 'worker' : 'worker';
+}
+function fileTabsForSelectedTask() {
+  return FILE_TAB_SETS[roleForSelectedTask()] || FILE_TAB_SETS.worker;
+}
+function renderFileTabs() {
+  const el = document.getElementById('fileTabs');
+  if (!el) return;
+  if (!selectedTask) { el.innerHTML = ''; return; }
+  el.innerHTML = fileTabsForSelectedTask().map(([name, label]) => `<button class="secondary" onclick="loadFile('${name}')">${esc(label)}</button>`).join('');
 }
 async function selectTask(id) {
   selectedTask = id;
   document.getElementById('fileTitle').textContent = `${selectedRun} / ${selectedTask}`;
+  renderFileTabs();
   renderTasks();
-  if (selectedFileName) await loadFile(selectedFileName);
-  else document.getElementById('fileContent').textContent = '';
+  if (selectedFileName && fileTabsForSelectedTask().some(([name]) => name === selectedFileName)) await loadFile(selectedFileName);
+  else {
+    selectedFileName = null;
+    document.getElementById('fileContent').textContent = '';
+    hideExecutionSummary();
+    updateCopyLastMessageButton();
+  }
 }
 async function loadFile(name, { preserveScroll = false } = {}) {
   if (!selectedRun || !selectedTask) return;
@@ -378,14 +470,14 @@ async function loadFile(name, { preserveScroll = false } = {}) {
   else pre.scrollTop = 0;
   if (name === 'events.pretty') await renderExecutionSummary();
   else hideExecutionSummary();
-  renderTmuxPanel();
   updateCopyLastMessageButton();
 }
 function clearFileView() {
   document.getElementById('fileTitle').textContent = '点击任务后选择文件';
   document.getElementById('fileContent').textContent = '';
+  const tabs = document.getElementById('fileTabs');
+  if (tabs) tabs.innerHTML = '';
   hideExecutionSummary();
-  hideTmuxPanel();
   updateCopyLastMessageButton();
 }
 function updateCopyLastMessageButton() {
@@ -411,48 +503,16 @@ function hideExecutionSummary() {
   el.classList.add('hidden');
   el.innerHTML = '';
 }
-function hideTmuxPanel() {
-  const el = document.getElementById('tmuxPanel');
-  el.classList.add('hidden');
-  el.innerHTML = '';
-}
-function renderTmuxPanel() {
-  const el = document.getElementById('tmuxPanel');
-  if (!el) return;
-  if (!selectedTask || !currentState) { hideTmuxPanel(); return; }
-  if (!isTmuxMode()) {
-    el.classList.remove('hidden');
-    el.innerHTML = '<div class="tmux-box-title">终端模式</div><span class="muted">当前 runner 为 headless，无需终端附加操作。</span>';
-    return;
-  }
-  const tmux = taskById(selectedTask)?.tmux;
-  if (!tmux) {
-    el.classList.remove('hidden');
-    el.innerHTML = '<div class="tmux-box-title">tmux 终端</div><span class="muted">该任务尚未生成 tmux window。</span>';
-    return;
-  }
-  el.classList.remove('hidden');
-  el.innerHTML = `
-    <div class="tmux-box-title">tmux 终端</div>
-    <span class="tmux-inline">session：${esc(tmux.sessionName || '-')}</span>
-    <span class="tmux-inline">window：${esc(tmux.windowName || '-')}</span>
-    <span class="tmux-inline">target：${esc(tmux.target || '-')}</span>
-    <div class="tmux-actions">
-      ${tmux.attachCommand ? `<button class="secondary" onclick="copyTmuxCommand(event, 'attach')">复制 attach</button>` : ''}
-      ${tmux.selectWindowCommand ? `<button class="secondary" onclick="copyTmuxCommand(event, 'select')">复制 select-window</button>` : ''}
-    </div>`;
-}
-async function copyTmuxCommand(event, kind) {
+async function copyTmuxRunCommand(event) {
   event.stopPropagation();
-  const tmux = taskById(selectedTask)?.tmux;
-  const command = kind === 'attach' ? tmux?.attachCommand : tmux?.selectWindowCommand;
+  const command = runAttachCommand(currentState);
   if (!command) return;
   try {
     await navigator.clipboard.writeText(command);
     event.currentTarget.textContent = '已复制';
-    setTimeout(() => { event.currentTarget.textContent = kind === 'attach' ? '复制 attach' : '复制 select-window'; }, 900);
+    setTimeout(() => { event.currentTarget.textContent = '复制tmux attach指令'; }, 900);
   } catch {
-    prompt(kind === 'attach' ? '复制 attachCommand' : '复制 selectWindowCommand', command);
+    prompt('复制 tmux attach 命令', command);
   }
 }
 async function renderExecutionSummary() {
