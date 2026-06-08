@@ -39,7 +39,10 @@ input-kanban \
 
 - `KANBAN_DEFAULT_REPO` / `--repo` should point to the actual git repository where work should run.
 - `KANBAN_RUNNER` / `--runner tmux` runs Codex tasks inside tmux windows while keeping scheduling and status tracking in the Node.js orchestrator.
-- `KANBAN_RUNNER=tmux` is optional. Use it when you want live terminal visibility into planner, worker, and final judge sessions, or when you need to manually respond to Codex CLI approval prompts.
-- tmux mode does not implement automatic approval. It does not bypass Codex CLI, repository, or system permission boundaries; any approval prompt must still be explicitly approved by the user in the relevant tmux window.
+- `KANBAN_RUNNER=tmux` is optional. Use it when you want live terminal visibility into planner, worker, and final judge sessions.
+- tmux mode uses one session per run and one window for planner, each batch, and judge. Batch windows contain an overview pane plus worker panes.
+- tmux role windows stay open after the Codex command exits. The runner writes `exit_code` before entering the keep-open shell so Node.js status refresh can continue to advance from filesystem state.
+- The dashboard exposes the run-level `tmux attach-session` copy action after tmux metadata is available. File viewer panels do not repeat tmux terminal details.
+- `codex exec` is non-interactive in current supported usage. tmux mode does not implement automatic approval and does not turn `codex exec` into an approval UI.
 - The runtime runs directory contains task text, logs, model output, artifacts, and possible audit information. It should not be committed to git.
 - Avoid writing machine-specific absolute paths into public or shared documentation.

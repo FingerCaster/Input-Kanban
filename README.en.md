@@ -63,16 +63,18 @@ Defaults:
 - Codex command: `codex`
 - runner: `headless`
 
-`--runner` currently supports `headless` and `tmux`. The default behavior remains `headless`; `tmux` creates one `input-kanban-<runId>` session per run and one window for the planner, each worker, and the final judge.
+`--runner` currently supports `headless` and `tmux`. The default behavior remains `headless`; `tmux` creates one `input-kanban-<runId>` session per run and one window for the planner, each batch, and the final judge. A batch window contains an overview pane plus the worker panes for that batch.
 
-tmux mode still leaves batch barriers, `maxParallel`, final judge sequencing, and `judge_input.json` generation in Node.js. Each role output directory gets `run.sh` and `tmux.json`; status continues to be driven by `events.jsonl`, `stderr.log`, `last_message.md`, `exit_code`, and existing artifact files.
+tmux mode still leaves batch barriers, `maxParallel`, final judge sequencing, and `judge_input.json` generation in Node.js. Each role output directory gets `run.sh` and `tmux.json`; status continues to be driven by `events.jsonl`, `stderr.log`, `last_message.md`, `exit_code`, and existing artifact files. After a tmux role command finishes, it writes `exit_code` first and then keeps the window open for inspection; the user closes the window manually from tmux.
 
-tmux mode is optional. It is intended for live terminal viewing of each Codex role and for cases where the Codex CLI asks the user for manual approval. It does not implement automatic approval and does not bypass Codex CLI, repository, or system permission boundaries; any approval prompt still has to be explicitly approved by the user in the relevant tmux window.
+tmux mode is optional and intended for live terminal viewing of each Codex role. `codex exec` is currently non-interactive and does not normally show manual approval prompts; if you select `danger-full-access` when creating a run, you explicitly relax the worker sandbox and should only do so in a controlled test repository.
+
+After run-level tmux metadata is available, the dashboard shows `Copy tmux attach command`. The file viewer no longer repeats tmux terminal details; use the run detail header to copy the attach command and inspect the tmux session.
 
 ## Using the Dashboard
 
 1. Click `New Run`.
-2. Enter a label, target repository, and task description.
+2. Enter a label, target repository, worker sandbox, and task description.
 3. Click `Create Run`.
 4. Click `Plan` to let the Codex planner generate batches and workers.
 5. Click `Dispatch` to run workers by batch barrier and concurrency limits.
@@ -85,6 +87,7 @@ tmux mode is optional. It is intended for live terminal viewing of each Codex ro
 - Split a larger Codex programming task into multiple workers.
 - Control execution order with batch barriers.
 - Observe each worker's local status, logs, and final response.
+- In tmux runner mode, inspect an overview pane and worker panes inside each batch window.
 - Run a final judge after all workers complete.
 - Keep local run records for debugging and recovery.
 
@@ -116,6 +119,7 @@ These files are local run records and do not need to be committed to your applic
 
 - Node.js 20 or newer.
 - Codex CLI installed and configured.
+- `tmux` installed when using `--runner tmux`.
 - The `codex` command works in your terminal, or `--codex-bin` points to the Codex executable.
 
 ## Maintainer Development
