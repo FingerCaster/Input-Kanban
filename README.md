@@ -1,45 +1,28 @@
 # Input Kanban
 
-Input Kanban is a lightweight local dashboard for splitting a Codex task into batches and workers, running them with `codex exec`, observing status, stopping or archiving runs, and performing a final judge pass.
+[中文](README.zh-CN.md) | English
 
-For implementation details and agent-facing project context, see:
+Input Kanban is a local dashboard for orchestrating Codex work with `codex exec`. Install it from npm, run `input-kanban`, and manage planner, worker, and final judge runs from your browser.
 
-```text
-PROJECT_GUIDE.md
-```
-
-For runtime environment variables, see:
-
-```text
-ENVIRONMENT.md
-```
-
-## Features
-
-- Static HTML dashboard with no frontend build step.
-- Node.js backend that can:
-  - create multiple runs;
-  - start a `codex exec` planner and materialize `plan.json`;
-  - safely retry planner runs before any worker or judge starts;
-  - detect `plan_empty` when the planner returns zero tasks;
-  - schedule workers by strict batch barriers and `batch.maxParallel`;
-  - generate `judge_input.json` before the final judge pass;
-  - start an independent `codex exec` final judge;
-  - aggregate PID, exit code, events, stderr, last message, artifacts, and Codex session IDs;
-  - stop runs, soft-archive runs, and manually mark failed or unknown workers as completed.
-
-## CLI Usage
-
-Run from the target repository directory:
+## Install
 
 ```bash
+npm install -g input-kanban
+```
+
+Verify the CLI:
+
+```bash
+input-kanban --help
+```
+
+## Start
+
+Run from the repository you want Codex to work on:
+
+```bash
+cd /path/to/repo
 input-kanban
-```
-
-Or provide the target repository explicitly:
-
-```bash
-input-kanban --repo /path/to/repo
 ```
 
 Then open:
@@ -48,7 +31,13 @@ Then open:
 http://127.0.0.1:8787
 ```
 
-Common options:
+Or provide the target repository explicitly:
+
+```bash
+input-kanban --repo /path/to/repo
+```
+
+## Common Options
 
 ```bash
 input-kanban --port 8787
@@ -58,83 +47,38 @@ input-kanban --codex-bin codex
 input-kanban --open
 ```
 
-## Development
+Defaults:
 
-```bash
-npm start
-```
+- repo: current working directory
+- host: `127.0.0.1`
+- port: `8787`
+- runs directory: `~/.input-kanban/runs`
+- Codex binary: `codex`
 
-For local CLI development:
+## What It Does
 
-```bash
-npm link
-input-kanban
-```
+- Creates local task runs from user-provided task text.
+- Starts a read-only planner with `codex exec --json`.
+- Schedules workers by strict batch barriers and `batch.maxParallel`.
+- Tracks local process status, exit codes, logs, final messages, and artifacts.
+- Generates `judge_input.json` and runs one final judge after all batches complete.
+- Supports stopping runs, soft-archiving runs, and manually marking failed or unknown workers as completed.
+- Shows formatted Codex JSONL logs in the dashboard.
 
-## Workflow
+## Typical Workflow
 
-1. Click `New Run`, then enter a label, target repo, max parallel value, and task text.
-2. Click `Create Run`.
-3. Click `Plan` to start the planner:
-   - planner uses `codex exec --json --sandbox read-only`;
-   - output is stored under `runs/<runId>/planner/`.
-4. When planning succeeds, `plan.json` is created and the worker list is shown.
-5. Click `Dispatch` to start workers according to batch barriers and `batch.maxParallel`.
-6. The page polls status every 3 seconds.
-7. After all batches complete, click `Final Judge` to run the final judge pass.
+1. Start `input-kanban` in the target repository.
+2. Open the dashboard.
+3. Create a run with task text.
+4. Click `Plan` to generate batches and workers.
+5. Click `Dispatch` to run workers.
+6. Inspect logs, final messages, and artifacts.
+7. Click `Final Judge` after all batches complete.
+8. Stop or archive runs when needed.
 
-The current UI labels are localized, but the project documentation is written in English for easier agent consumption.
+## Runtime Data
 
-## Planner Output Format
-
-The preferred planner response is a JSON object with `batches`. The older `tasks` shape is also supported.
-
-```json
-{
-  "batches": [
-    {
-      "id": "batch-1",
-      "name": "first batch name",
-      "maxParallel": 3,
-      "tasks": [
-        {
-          "id": "T-01",
-          "name": "short name",
-          "prompt": "complete worker prompt",
-          "sandbox": "workspace-write",
-          "expectedArtifacts": ["tmp/example-result.json"]
-        }
-      ]
-    }
-  ],
-  "finalJudgeRequired": true
-}
-```
-
-The backend extracts the first JSON object from `last_message.md`. If the planner succeeds but returns zero tasks, the run is marked `plan_empty` and can be planned again before any worker or judge starts.
-
-## Status Sources
-
-Worker status is primarily determined from local state:
-
-- Node child process tracking
-- `exit_code`
-- `events.jsonl`
-- `stderr.log`
-- `last_message.md`
-- expected artifacts
-
-Codex App Server is an auxiliary source only:
-
-- the backend starts `codex app-server --stdio`;
-- it calls `thread/list`;
-- it matches sessions using prompt markers:
-  - `ORCHESTRATOR_RUN_ID`
-  - `ORCHESTRATOR_TASK_ID`
-
-A Codex App Server `notLoaded` state does not mean a worker failed. The local process, exit code, logs, and artifacts remain the source of truth.
-
-## Runtime Directory
+Runtime data is stored under the configured runs directory:
 
 ```text
 runs/<runId>/
@@ -148,10 +92,35 @@ runs/<runId>/
     └── verdict.json
 ```
 
-The development `runs/` directory is gitignored. For CLI usage, the default runtime directory is `~/.input-kanban/runs`.
+For CLI usage, the default runs directory is:
 
-## Checks
+```text
+~/.input-kanban/runs
+```
+
+## Development
+
+```bash
+git clone https://github.com/zhang3xing1/Input-Kanban.git
+cd Input-Kanban
+npm install
+npm start
+```
+
+For local CLI development:
+
+```bash
+npm link
+input-kanban --help
+```
+
+Run checks:
 
 ```bash
 npm run check
 ```
+
+## More Documentation
+
+- [Project guide](PROJECT_GUIDE.md)
+- [Environment variables](ENVIRONMENT.md)
