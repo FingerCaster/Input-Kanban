@@ -1,0 +1,30 @@
+npm notice
+npm notice 📦  input-kanban@0.0.2
+npm notice Tarball Contents
+npm notice 2.3kB ENVIRONMENT.md
+npm notice 12.2kB PROJECT_GUIDE.md
+npm notice 4.1kB README.en.md
+npm notice 4.0kB README.md
+npm notice 3.5kB bin/input-kanban.js
+npm notice 1.2kB package.json
+npm notice 32.5kB public/index.html
+npm notice 2.9kB src/appServerClient.js
+npm notice 33.8kB src/orchestrator.js
+npm notice 1.8kB src/runners/headlessRunner.js
+npm notice 469B src/runners/index.js
+npm notice 4.8kB src/runners/tmuxRunner.js
+npm notice 292B src/runners/tmuxUtils.js
+npm notice 5.4kB src/server.js
+npm notice 5.3kB src/tmux.js
+npm notice 3.9kB src/utils.js
+npm notice Tarball Details
+npm notice name: input-kanban
+npm notice version: 0.0.2
+npm notice filename: input-kanban-0.0.2.tgz
+npm notice package size: 34.7 kB
+npm notice unpacked size: 118.3 kB
+npm notice shasum: c058be6edfc1faca5d292938db5e09a65d26a403
+npm notice integrity: sha512-idb4XjE39+3c0[...]1fD/Iq1y3YhOQ==
+npm notice total files: 16
+npm notice
+input-kanban-0.0.2.tgz

@@ -50,6 +50,7 @@ input-kanban --port 8787
 input-kanban --host 127.0.0.1
 input-kanban --runs-dir ~/.input-kanban/runs
 input-kanban --codex-bin codex
+input-kanban --runner headless
 input-kanban --open
 ```
 
@@ -60,6 +61,13 @@ Defaults:
 - port: `8787`
 - runs directory: `~/.input-kanban/runs`
 - Codex command: `codex`
+- runner: `headless`
+
+`--runner` currently supports `headless` and `tmux`. The default behavior remains `headless`; `tmux` creates one `input-kanban-<runId>` session per run and one window for the planner, each worker, and the final judge.
+
+tmux mode still leaves batch barriers, `maxParallel`, final judge sequencing, and `judge_input.json` generation in Node.js. Each role output directory gets `run.sh` and `tmux.json`; status continues to be driven by `events.jsonl`, `stderr.log`, `last_message.md`, `exit_code`, and existing artifact files.
+
+tmux mode is optional. It is intended for live terminal viewing of each Codex role and for cases where the Codex CLI asks the user for manual approval. It does not implement automatic approval and does not bypass Codex CLI, repository, or system permission boundaries; any approval prompt still has to be explicitly approved by the user in the relevant tmux window.
 
 ## Using the Dashboard
 

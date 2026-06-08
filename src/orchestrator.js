@@ -1,15 +1,27 @@
-import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import {
-  CODEX_BIN, DEFAULT_REPO, RUNS_DIR, ensureDir, nowIso, makeRunId, readJson,
+  DEFAULT_REPO, RUNS_DIR, ensureDir, nowIso, makeRunId, readJson,
   writeJsonAtomic, fileInfo, readTextMaybe, extractFirstJsonObject, listRunDirs,
-  pathForRun, roleDir, safeIdPart
+  pathForRun, roleDir, safeIdPart, RUNNER
 } from './utils.js';
 import { matchThreadToMarkers } from './appServerClient.js';
+import { defaultRunner } from './runners/index.js';
 
-const runningChildren = new Map(); // key: `${runId}:${taskId}` -> child
+const runner = defaultRunner;
+const ATTENTION_IDLE_MS = 5 * 60 * 1000;
+const ATTENTION_MIN_RUNTIME_MS = 10 * 60 * 1000;
+const ATTENTION_KEYWORDS = [
+  'permission',
+  'approval',
+  'approve',
+  'confirm',
+  'continue',
+  'password',
+  'authentication',
+  'authenticate'
+];
 
 function statePath(runDir) { return path.join(runDir, 'run_state.json'); }
 function planPath(runDir) { return path.join(runDir, 'plan.json'); }
@@ -21,6 +33,7 @@ export async function createRun({ label = 'task', taskText = '', repo = DEFAULT_
   await fsp.writeFile(path.join(runDir, 'task.md'), taskText || '');
   const state = {
     runId, label, repo: path.resolve(repo), maxParallel: Number(maxParallel) || 3,
+    runner: RUNNER,
     status: 'created', createdAt: nowIso(), updatedAt: nowIso(),
     planner: { status: 'pending' }, batches: [], tasks: [], judge: { status: 'pending' }
   };
@@ -132,24 +145,6 @@ Plan: ${path.join(pathForRun(state.runId), 'plan.json')}
 `;
 }
 
-function spawnCodex({ state, taskId, prompt, sandbox, cwd, outDir }) {
-  const events = path.join(outDir, 'events.jsonl');
-  const stderr = path.join(outDir, 'stderr.log');
-  const last = path.join(outDir, 'last_message.md');
-  fs.writeFileSync(path.join(outDir, 'prompt.md'), prompt);
-  const args = ['exec', '--json', '--sandbox', sandbox, '-C', cwd, '-o', last, prompt];
-  const child = spawn(CODEX_BIN, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
-  child.stdout.pipe(fs.createWriteStream(events, { flags: 'a' }));
-  child.stderr.pipe(fs.createWriteStream(stderr, { flags: 'a' }));
-  const key = `${state.runId}:${taskId}`;
-  runningChildren.set(key, child);
-  child.on('exit', code => {
-    try { fs.writeFileSync(path.join(outDir, 'exit_code'), String(code)); } catch {}
-    runningChildren.delete(key);
-  });
-  return child;
-}
-
 export async function startPlanner(runId) {
   const state = await loadRun(runId);
   if (!state) throw new Error(`run not found: ${runId}`);
@@ -168,11 +163,11 @@ export async function startPlanner(runId) {
   await fsp.rm(planPath(runDir), { force: true });
   const taskText = await fsp.readFile(path.join(runDir, 'task.md'), 'utf8');
   const prompt = defaultPlannerPrompt(state, taskText);
-  const child = spawnCodex({ state, taskId: 'planner', prompt, sandbox: 'read-only', cwd: state.repo, outDir });
+  const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', prompt, sandbox: 'read-only', cwd: state.repo, outDir });
   state.status = 'planning';
   state.planner = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir, attempt: (state.plannerAttempts?.length || 0) + 1 };
   await saveRun(state);
-  child.on('exit', async code => {
+  child.onExit(async code => {
     const s = await loadRun(runId); if (!s || s.status === 'stopped') return;
     s.planner.exitCode = code; s.planner.endedAt = nowIso(); s.planner.status = code === 0 ? 'completed' : 'failed';
     const planResult = await materializePlan(s);
@@ -304,7 +299,7 @@ ORCHESTRATOR_BATCH_ID: ${task.batchId || 'batch-1'}
 
 ${task.prompt}
 `;
-  const child = spawnCodex({ state, taskId: task.id, prompt: fullPrompt, sandbox: task.sandbox || 'workspace-write', cwd: state.repo, outDir });
+  const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, prompt: fullPrompt, sandbox: task.sandbox || 'workspace-write', cwd: state.repo, outDir });
   Object.assign(task, { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir });
 }
 
@@ -312,12 +307,7 @@ export async function stopRun(runId, { reason = 'stopped by user' } = {}) {
   const state = await loadRun(runId);
   if (!state) throw new Error(`run not found: ${runId}`);
   const stoppedAt = nowIso();
-  for (const [key, child] of runningChildren.entries()) {
-    if (key.startsWith(`${runId}:`)) {
-      try { child.kill('TERM'); } catch {}
-      runningChildren.delete(key);
-    }
-  }
+  await runner.stopRun(runId);
   for (const roleState of [state.planner, state.judge]) {
     if (roleState?.status === 'running') Object.assign(roleState, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
   }
@@ -400,11 +390,11 @@ export async function startJudge(runId) {
   const judgeInput = await buildJudgeInput(state);
   await writeJsonAtomic(judgeInputPath, judgeInput);
   const prompt = defaultJudgePrompt(state, judgeInputPath);
-  const child = spawnCodex({ state, taskId: 'judge', prompt, sandbox: 'read-only', cwd: state.repo, outDir });
+  const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', prompt, sandbox: 'read-only', cwd: state.repo, outDir });
   state.judge = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir };
   state.status = 'judging';
   await saveRun(state);
-  child.on('exit', async code => {
+  child.onExit(async code => {
     const s = await loadRun(runId); if (!s || s.status === 'stopped') return;
     s.judge.exitCode = code; s.judge.endedAt = nowIso(); s.judge.status = code === 0 ? 'completed' : 'failed';
     const text = await readTextMaybe(path.join(outDir, 'last_message.md'), 1000000);
@@ -423,9 +413,12 @@ export async function refreshRun(runId, appClient = null) {
 async function loadAndRefreshRun(runId, appClient = null, { light = false } = {}) {
   const state = await loadRun(runId);
   if (!state) return null;
+  state.runner = state.runner || RUNNER;
   await refreshRole(state, state.planner, roleDir(pathForRun(runId), 'planner'));
+  await recoverCompletedPlanner(state);
   for (const task of state.tasks || []) await refreshTask(state, task);
   await refreshRole(state, state.judge, roleDir(pathForRun(runId), 'judge'));
+  await recoverCompletedJudge(state);
   recomputeRunStatus(state);
   await scheduleMoreWorkers(state);
   recomputeRunStatus(state);
@@ -434,19 +427,43 @@ async function loadAndRefreshRun(runId, appClient = null, { light = false } = {}
   return state;
 }
 
+async function recoverCompletedPlanner(state) {
+  if (state.planner?.status !== 'completed' || state.tasks?.length || state.batches?.length) return;
+  const planResult = await materializePlan(state);
+  if (planResult.ok) state.status = 'planned';
+  else if (planResult.empty) state.status = 'plan_empty';
+  else state.status = 'plan_failed';
+}
+
+async function recoverCompletedJudge(state) {
+  if (!['completed', 'failed'].includes(state.judge?.status)) return;
+  if (state.judge.status === 'completed' && !state.judge.verdict) {
+    const outDir = roleDir(pathForRun(state.runId), 'judge');
+    const text = await readTextMaybe(path.join(outDir, 'last_message.md'), 1000000);
+    const verdict = extractFirstJsonObject(text);
+    if (verdict) {
+      state.judge.verdict = verdict;
+      await writeJsonAtomic(path.join(outDir, 'verdict.json'), verdict);
+    }
+  }
+  state.status = state.judge.status === 'completed' ? 'judged' : 'judge_failed';
+}
+
 async function refreshRole(state, roleState, dir) {
   if (!roleState) return;
   const exitPath = path.join(dir, 'exit_code');
   const exit = await readTextMaybe(exitPath, 1000);
   const exitInfo = await fileInfo(exitPath);
-  const key = `${state.runId}:${roleState === state.judge ? 'judge' : 'planner'}`;
+  const key = roleState === state.judge ? 'judge' : 'planner';
   if (exit !== '') {
     roleState.exitCode = Number(exit.trim());
     if (!roleState.endedAt && exitInfo.exists) roleState.endedAt = exitInfo.mtime;
     if (roleState.status === 'running') roleState.status = roleState.exitCode === 0 ? 'completed' : 'failed';
   }
-  else if (roleState.status === 'running' && !runningChildren.has(key)) roleState.status = 'unknown';
+  else if (roleState.status === 'running' && !runner.hasRunning(state.runId, key)) roleState.status = 'unknown';
   roleState.files = await standardFiles(dir);
+  await attachTmuxMetadata(roleState, dir);
+  roleState.attentionHint = await buildAttentionHint({ state, target: roleState, dir });
 }
 
 async function refreshTask(state, task) {
@@ -454,13 +471,14 @@ async function refreshTask(state, task) {
   const exitPath = path.join(dir, 'exit_code');
   const exit = await readTextMaybe(exitPath, 1000);
   const exitInfo = await fileInfo(exitPath);
-  const key = `${state.runId}:${task.id}`;
   if (exit !== '') {
     task.exitCode = Number(exit.trim());
     if (!task.endedAt && exitInfo.exists) task.endedAt = exitInfo.mtime;
     if (task.status === 'running') task.status = task.exitCode === 0 ? 'completed' : 'failed';
-  } else if (task.status === 'running' && !runningChildren.has(key)) task.status = 'unknown';
+  } else if (task.status === 'running' && !runner.hasRunning(state.runId, task.id)) task.status = 'unknown';
   task.files = await standardFiles(dir);
+  await attachTmuxMetadata(task, dir);
+  task.attentionHint = await buildAttentionHint({ state, target: task, dir });
   task.artifacts = [];
   for (const rel of task.expectedArtifacts || []) task.artifacts.push({ path: rel, ...(await fileInfo(path.isAbsolute(rel) ? rel : path.join(state.repo, rel))) });
   const batch = (state.batches || []).find(b => b.id === task.batchId);
@@ -470,13 +488,77 @@ async function refreshTask(state, task) {
   }
 }
 
+async function attachTmuxMetadata(target, dir) {
+  const raw = await readJson(path.join(dir, 'tmux.json'), null);
+  if (!raw || raw.runner !== 'tmux') {
+    delete target.tmux;
+    return;
+  }
+  const selectWindowCommand = raw.selectWindowCommand || raw.selectCommand || '';
+  target.tmux = {
+    runner: 'tmux',
+    sessionName: raw.sessionName || '',
+    windowName: raw.windowName || '',
+    target: raw.target || '',
+    attachCommand: raw.attachCommand || '',
+    selectWindowCommand,
+    runScript: raw.runScript || '',
+    startedAt: raw.startedAt || ''
+  };
+}
+
+async function buildAttentionHint({ state, target, dir }) {
+  if (!['running', 'unknown'].includes(target?.status) || state?.status === 'stopped') return null;
+  if ((state?.runner || RUNNER) !== 'tmux' && !target.tmux) return null;
+  const reasons = [];
+  const textTail = [
+    await readTextMaybe(path.join(dir, 'stderr.log'), 20000),
+    await readTextMaybe(path.join(dir, 'events.jsonl'), 20000)
+  ].join('\n');
+  const keyword = findAttentionKeyword(textTail);
+  if (keyword) reasons.push(`log tail contains "${keyword}"`);
+  const idle = taskIdleSnapshot(target);
+  if (idle.isLongIdle || (target.status === 'unknown' && idle.isIdle)) reasons.push(`no recent log updates for ${Math.round(idle.idleMs / 1000)}s`);
+  if (!reasons.length) return null;
+  return {
+    message: 'This task may need manual intervention; attach to tmux to inspect.',
+    reasons,
+    attachCommand: target.tmux?.attachCommand || '',
+    detectedAt: nowIso()
+  };
+}
+
+function findAttentionKeyword(text) {
+  const lower = String(text || '').toLowerCase();
+  return ATTENTION_KEYWORDS.find(keyword => lower.includes(keyword)) || null;
+}
+
+function taskIdleSnapshot(target) {
+  const now = Date.now();
+  const startedMs = Date.parse(target?.startedAt || '');
+  const runtimeMs = Number.isFinite(startedMs) ? now - startedMs : 0;
+  const recentMs = [target?.files?.events, target?.files?.stderr, target?.files?.lastMessage]
+    .filter(info => info?.exists && Number.isFinite(info.mtimeMs))
+    .map(info => info.mtimeMs)
+    .sort((a, b) => b - a)[0];
+  const idleMs = Number.isFinite(recentMs) ? now - recentMs : runtimeMs;
+  return {
+    idleMs,
+    runtimeMs,
+    isIdle: idleMs >= ATTENTION_IDLE_MS,
+    isLongIdle: runtimeMs >= ATTENTION_MIN_RUNTIME_MS && idleMs >= ATTENTION_IDLE_MS
+  };
+}
+
 async function standardFiles(dir) {
   return {
     prompt: await fileInfo(path.join(dir, 'prompt.md')),
     events: await fileInfo(path.join(dir, 'events.jsonl')),
     stderr: await fileInfo(path.join(dir, 'stderr.log')),
     lastMessage: await fileInfo(path.join(dir, 'last_message.md')),
-    exitCode: await fileInfo(path.join(dir, 'exit_code'))
+    exitCode: await fileInfo(path.join(dir, 'exit_code')),
+    runScript: await fileInfo(path.join(dir, 'run.sh')),
+    tmux: await fileInfo(path.join(dir, 'tmux.json'))
   };
 }
 
@@ -567,6 +649,7 @@ async function buildJudgeInput(state) {
       resultJson: await readJson(path.join(dir, 'result.json'), null),
       evidenceJson: await readJson(path.join(dir, 'evidence.json'), null),
       manualCompletion: task.manualCompletion || await readJson(path.join(dir, 'manual_completion.json'), null),
+      tmux: task.tmux || null,
       stderrTail: await readTextMaybe(path.join(dir, 'stderr.log'), 20000)
     });
   }
@@ -579,6 +662,7 @@ async function buildJudgeInput(state) {
       label: state.label,
       repo: state.repo,
       status: state.status,
+      runner: state.runner || RUNNER,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       maxParallel: state.maxParallel
@@ -597,6 +681,7 @@ async function buildJudgeInput(state) {
       exitCode: state.planner?.exitCode ?? null,
       planParseError: state.planner?.planParseError,
       planEmpty: !!state.planner?.planEmpty,
+      tmux: state.planner?.tmux || null,
       lastMessage: await readTextMaybe(path.join(roleDir(runDir, 'planner'), 'last_message.md'), 200000)
     },
     tasks
@@ -629,7 +714,7 @@ async function enrichFromAppServer(state, appClient) {
 
 function summaryOfRun(s) {
   const tasks = s.tasks || [];
-  return { runId: s.runId, label: s.label, repo: s.repo, status: s.status, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
+  return { runId: s.runId, label: s.label, repo: s.repo, status: s.status, runner: s.runner || RUNNER, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
 }
 
 function formatCodexEventsJsonl(text) {
@@ -718,7 +803,7 @@ export async function readRunTaskText(runId) {
 
 export async function readRunFile(runId, taskId, name) {
   const runDir = pathForRun(runId);
-  const allowed = new Set(['prompt.md','events.jsonl','events.pretty','stderr.log','last_message.md','exit_code','result.json','evidence.json','verdict.json','judge_input.json','manual_completion.json']);
+  const allowed = new Set(['prompt.md','events.jsonl','events.pretty','stderr.log','last_message.md','exit_code','result.json','evidence.json','verdict.json','judge_input.json','manual_completion.json','run.sh','tmux.json']);
   if (!allowed.has(name)) throw new Error('file not allowed');
   let dir;
   if (taskId === 'planner') dir = roleDir(runDir, 'planner');

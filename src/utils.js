@@ -7,6 +7,15 @@ export const APP_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathn
 export const DEFAULT_REPO = path.resolve(process.env.KANBAN_DEFAULT_REPO || process.cwd());
 export const RUNS_DIR = path.resolve(process.env.KANBAN_RUNS_DIR || path.join(process.env.HOME || APP_ROOT, '.input-kanban', 'runs'));
 export const CODEX_BIN = process.env.KANBAN_CODEX_BIN || 'codex';
+export const VALID_RUNNERS = ['headless', 'tmux'];
+
+export function normalizeRunner(value = 'headless', source = 'KANBAN_RUNNER') {
+  const runner = String(value || '').trim();
+  if (VALID_RUNNERS.includes(runner)) return runner;
+  throw new Error(`invalid ${source}: ${value}; expected one of: ${VALID_RUNNERS.join(', ')}`);
+}
+
+export const RUNNER = normalizeRunner(process.env.KANBAN_RUNNER || 'headless');
 
 export async function ensureDir(dir) { await fsp.mkdir(dir, { recursive: true }); }
 export function nowIso() { return new Date().toISOString(); }

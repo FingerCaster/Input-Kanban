@@ -2,8 +2,15 @@
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
+const VALID_RUNNERS = ['headless', 'tmux'];
+
+function validateRunner(value, source) {
+  if (VALID_RUNNERS.includes(value)) return value;
+  throw new Error(`invalid ${source}: ${value}; expected one of: ${VALID_RUNNERS.join(', ')}`);
+}
+
 function parseArgs(argv) {
-  const args = { host: '127.0.0.1', port: undefined, repo: undefined, runsDir: undefined, codexBin: undefined, open: false, help: false };
+  const args = { host: '127.0.0.1', port: undefined, repo: undefined, runsDir: undefined, codexBin: undefined, runner: undefined, open: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
@@ -15,6 +22,7 @@ function parseArgs(argv) {
     else if (arg === '--repo' || arg === '-r') args.repo = next();
     else if (arg === '--runs-dir') args.runsDir = next();
     else if (arg === '--codex-bin') args.codexBin = next();
+    else if (arg === '--runner') args.runner = validateRunner(next(), '--runner');
     else throw new Error(`unknown argument: ${arg}`);
   }
   return args;
@@ -32,6 +40,7 @@ Options:
   -r, --repo <path>      Default target repository, default current directory
   --runs-dir <path>      Runtime runs directory, default ~/.input-kanban/runs
   --codex-bin <path>     Codex CLI executable, default codex
+  --runner <mode>        Runner mode: headless or tmux, default headless
   --open                 Open browser after starting
   --no-open              Do not open browser, default
   -h, --help             Show help
@@ -54,6 +63,7 @@ try {
   else if (!process.env.KANBAN_DEFAULT_REPO) process.env.KANBAN_DEFAULT_REPO = process.cwd();
   if (args.runsDir) process.env.KANBAN_RUNS_DIR = path.resolve(args.runsDir);
   if (args.codexBin) process.env.KANBAN_CODEX_BIN = args.codexBin;
+  if (args.runner) process.env.KANBAN_RUNNER = args.runner;
 
   const { startServer } = await import('../src/server.js');
   const instance = await startServer({ host: process.env.HOST, port: Number(process.env.PORT || 8787), log: false });
@@ -61,6 +71,7 @@ try {
   console.log(`URL:  ${instance.url}`);
   console.log(`Repo: ${instance.defaultRepo}`);
   console.log(`Runs: ${instance.runsDir}`);
+  console.log(`Runner: ${instance.runner}`);
   if (args.open) openBrowser(instance.url);
   const shutdown = () => { instance.stop().finally(() => process.exit(0)); };
   process.on('SIGINT', shutdown);

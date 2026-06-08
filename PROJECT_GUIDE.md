@@ -322,6 +322,30 @@ npm run check
 
 When editing `public/index.html`, also consider extracting the inline script and checking it with `node --check`.
 
+## Manual Smoke Checklist
+
+Use this checklist before an npm release when runner behavior or package contents
+change. Record the exact commands, run ids, and artifact paths in the release
+notes or handoff.
+
+1. Headless runner:
+   - Start the app with `input-kanban --runner headless --runs-dir <tmp-runs-dir> --repo <target-repo> --port <free-port>`.
+   - Create a small run, plan it, dispatch at least one worker, and run the final judge if the plan requires it.
+   - Verify the run state reports `runner: headless`, no task exposes `tmux` metadata, and role directories contain the expected `prompt.md`, `events.jsonl`, `stderr.log`, `last_message.md`, and `exit_code` files.
+   - Stop the run and verify no unrelated local process is affected.
+
+2. tmux runner, only when `tmux -V` succeeds:
+   - Start the app with `input-kanban --runner tmux --runs-dir <tmp-runs-dir> --repo <target-repo> --port <free-port>`.
+   - Create a small run and click Plan. Verify a session named `input-kanban-<runId>` exists and has a planner window.
+   - Dispatch workers. Verify each worker gets its own window and each role directory writes `run.sh` and `tmux.json` with the expected `sessionName`, `windowName`, `target`, `attachCommand`, and `selectWindowCommand`.
+   - Complete or stop the run. Verify stop removes only the exact `input-kanban-<runId>` tmux session and leaves any other tmux session running.
+   - Do not mark this smoke as passed when tmux is unavailable or when these tmux checks were not run.
+
+3. Package dry run:
+   - Run `npm pack --dry-run`.
+   - Verify the package includes `bin/`, `src/`, `public/`, `README.md`, `README.en.md`, `PROJECT_GUIDE.md`, `ENVIRONMENT.md`, and `package.json`.
+   - Verify no runtime run directories, local logs, or unrelated temporary artifacts are included.
+
 ## Change Guidelines
 
 - Do not add automatic worker retry unless there is a verified rollback or idempotency mechanism.

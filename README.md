@@ -50,6 +50,7 @@ input-kanban --port 8787
 input-kanban --host 127.0.0.1
 input-kanban --runs-dir ~/.input-kanban/runs
 input-kanban --codex-bin codex
+input-kanban --runner headless
 input-kanban --open
 ```
 
@@ -60,6 +61,13 @@ input-kanban --open
 - port：`8787`
 - runs 目录：`~/.input-kanban/runs`
 - Codex 命令：`codex`
+- runner：`headless`
+
+`--runner` 当前支持 `headless` 和 `tmux`。默认行为保持 `headless`；`tmux` 会为每个 run 创建一个 `input-kanban-<runId>` session，并为 planner、每个 worker、final judge 创建独立 window。
+
+tmux 模式仍由 Node.js 负责 batch barrier、`maxParallel`、final judge 顺序和 `judge_input.json` 生成。每个角色输出目录会写入 `run.sh` 和 `tmux.json`，状态继续由 `events.jsonl`、`stderr.log`、`last_message.md`、`exit_code` 和既有 artifact 文件驱动。
+
+tmux 模式是可选能力，主要用于在终端里实时查看每个 Codex 角色的执行过程，并在 Codex CLI 需要人工确认时让用户手动处理。它不会实现自动审批，也不会绕过 Codex CLI、仓库权限或系统权限的安全边界；所有需要确认的操作仍必须由用户在对应 tmux window 中明确批准。
 
 ## 在看板里如何使用
 
