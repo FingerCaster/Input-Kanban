@@ -32,7 +32,7 @@ async function serveStatic(req, res, pathname) {
   try {
     const data = await fsp.readFile(file);
     const ext = path.extname(file);
-    const type = ext === '.html' ? 'text/html' : ext === '.js' ? 'text/javascript' : ext === '.css' ? 'text/css' : 'text/plain';
+    const type = ext === '.html' ? 'text/html' : ext === '.js' ? 'text/javascript' : ext === '.css' ? 'text/css' : ext === '.png' ? 'image/png' : ext === '.svg' ? 'image/svg+xml' : 'text/plain';
     res.writeHead(200, { 'Content-Type': `${type}; charset=utf-8` });
     res.end(data);
   } catch { notFound(res); }

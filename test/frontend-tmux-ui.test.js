@@ -11,6 +11,12 @@ test('public inline script remains parseable', () => {
   assert.doesNotThrow(() => new vm.Script(script));
 });
 
+test('header and browser tab use Input Kanban icons', () => {
+  assert.match(html, /<link rel="icon" type="image\/png" sizes="32x32" href="\/assets\/input-kanban-favicon-32\.png" \/>/);
+  assert.match(html, /<link rel="apple-touch-icon" sizes="180x180" href="\/assets\/input-kanban-apple-touch-icon\.png" \/>/);
+  assert.match(html, /<h1 class="brand"><img class="brand-icon" src="\/assets\/input-kanban-icon\.png"/);
+});
+
 test('create form exposes worker sandbox selector', () => {
   assert.match(html, /<select id="workerSandbox">/);
   assert.match(html, /danger-full-access（高风险，跳过沙箱限制）/);
@@ -21,6 +27,7 @@ test('create form exposes worker sandbox selector', () => {
 
 test('selected run header uses compact metadata chips', () => {
   assert.match(html, /\.meta-chip/);
+  assert.match(html, /\.run-card-meta/);
   assert.match(script, /metaChip\('Run ID', currentState\.runId/);
   assert.match(script, /metaChip\('仓库', basenamePath\(currentState\.repo\)/);
   assert.match(script, /metaChip\('终端', tmuxSessionName\(currentState\)/);
@@ -29,6 +36,14 @@ test('selected run header uses compact metadata chips', () => {
   assert.match(script, /terminalStatuses\.has\(s\.status\)/);
   assert.match(script, /metaChip\('刷新', `每 \$\{AUTO_REFRESH_MS \/ 1000\} 秒`\)/);
   assert.doesNotMatch(script, /durationSeconds\(currentState\.createdAt, currentState\.updatedAt\)/);
+  assert.match(script, /metaChip\('进度', `\$\{r\.completed\}\/\$\{r\.total\}`\)/);
+  assert.match(script, /metaChip\('执行中', r\.running\)/);
+  assert.match(script, /metaChip\('失败', r\.failed/);
+  assert.match(html, /\.batch-row-meta/);
+  assert.match(script, /metaChip\('Batch ID', b\.id\)/);
+  assert.match(script, /metaChip\('最大并发', b\.maxParallel \|\| '-'/);
+  assert.match(script, /metaChip\('进度', `\$\{done\}\/\$\{\(b\.tasks \|\| \[\]\)\.length\}`\)/);
+  assert.doesNotMatch(script, /run-card-progress/);
   assert.doesNotMatch(script, /Worker 沙箱=/);
 });
 

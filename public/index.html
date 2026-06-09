@@ -4,11 +4,15 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Input 看板</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/input-kanban-favicon-32.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/input-kanban-apple-touch-icon.png" />
   <style>
     :root { --bg:#0b1220; --panel:#111827; --panel-2:#0f172a; --line:#334155; --line-strong:#64748b; --text:#e2e8f0; --muted:#94a3b8; --blue:#2563eb; --green:#166534; --red:#991b1b; --gray:#475569; --orange:#b45309; }
     body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
     header { padding: 18px 24px; background: #0a1020; border-bottom: 1px solid var(--line); box-shadow: 0 1px 0 rgba(255,255,255,.03); }
     h1 { margin: 0; font-size: 22px; letter-spacing: .2px; }
+    .brand { display: inline-flex; align-items: center; gap: 10px; }
+    .brand-icon { width: 30px; height: 30px; border-radius: 9px; object-fit: cover; border: 1px solid rgba(148,163,184,.35); box-shadow: 0 1px 0 rgba(255,255,255,.08); }
     h2 { margin: 0 0 12px; font-size: 24px; }
     h3 { margin: 18px 0 8px; font-size: 15px; color: #cbd5e1; }
     main { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 18px; padding: 18px; align-items: start; min-height: calc(100vh - 59px); }
@@ -43,6 +47,10 @@
     .plan_empty { background: var(--orange); }
     .pending, .created { background: var(--gray); }
     .batch-row td { border-top: 3px solid var(--line-strong); background: #101827; font-weight: 800; font-size: 14px; padding-top: 13px; }
+    .batch-row-content { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .batch-row-title { font-size: 15px; }
+    .batch-row-meta { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .batch-row-meta .meta-chip { padding: 4px 7px; font-size: 11px; }
     .job-row.selected { background: rgba(37,99,235,.16); box-shadow: inset 3px 0 0 #60a5fa; }
     .task-name { min-width: 0; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .task-role { display: block; margin-top: 2px; }
@@ -61,8 +69,9 @@
     .run-card-name { min-width: 0; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .run-card-title .pill { flex: 0 0 auto; }
     .run-card-id { margin-top: 5px; word-break: break-all; }
-    .run-card-created { margin-top: 4px; color: var(--muted); font-size: 12px; }
-    .run-card-progress { margin-top: 8px; display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+    .run-card-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .run-card-meta .meta-chip { padding: 4px 7px; font-size: 11px; }
+    .run-card-meta .meta-chip.long .meta-value { max-width: 248px; }
     .build-header { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel-2); margin-bottom: 14px; }
     .build-title { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 900; }
     .build-meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
@@ -91,7 +100,7 @@
   </style>
 </head>
 <body>
-<header><h1>Input 看板</h1></header>
+<header><h1 class="brand"><img class="brand-icon" src="/assets/input-kanban-icon.png" alt="" aria-hidden="true" />Input 看板</h1></header>
 <main>
   <div class="sidebar">
     <section>
@@ -284,9 +293,13 @@ function renderRunList() {
   const cards = visibleRuns.map(r => `
     <div class="run-card ${selectedRun === r.runId ? 'active' : ''}" onclick="selectRun('${r.runId}')">
       <div class="run-card-title"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><span>${pill(r.status)}</span></div>
-      <div class="run-card-id muted">${esc(r.runId)}</div>
-      <div class="run-card-created">创建 ${esc(formatDateTime(r.createdAt))}</div>
-      <div class="run-card-progress"><span>进度 ${r.completed}/${r.total}</span><span>执行中 ${r.running}｜失败 ${r.failed}</span></div>
+      <div class="run-card-meta">
+        ${metaChip('Run ID', r.runId, { long: true })}
+        ${metaChip('创建', formatDateTime(r.createdAt))}
+        ${metaChip('进度', `${r.completed}/${r.total}`)}
+        ${metaChip('执行中', r.running)}
+        ${metaChip('失败', r.failed, { danger: Number(r.failed) > 0 })}
+      </div>
     </div>`);
   if (latestRuns.length > runListVisibleCount) {
     cards.push(`<button class="secondary run-list-more" onclick="showMoreRuns()">查看更多（${runListVisibleCount}/${latestRuns.length}）</button>`);
@@ -414,7 +427,7 @@ function renderTasks() {
   if (Array.isArray(s.batches) && s.batches.length) {
     for (const b of s.batches) {
       const done = (b.tasks || []).filter(t => t.status === 'completed').length;
-      rows.push(`<tr class="batch-row"><td colspan="${columnCount}">${esc(b.name || b.id)} ${pill(b.status)} <span class="muted">${esc(b.id)}｜最大并发 ${esc(b.maxParallel || '-')}｜${done}/${(b.tasks || []).length}</span></td></tr>`);
+      rows.push(`<tr class="batch-row"><td colspan="${columnCount}"><div class="batch-row-content"><span class="batch-row-title">${esc(b.name || b.id)}</span>${pill(b.status)}<span class="batch-row-meta">${metaChip('Batch ID', b.id)}${metaChip('最大并发', b.maxParallel || '-')}${metaChip('进度', `${done}/${(b.tasks || []).length}`)}</span></div></td></tr>`);
       for (const t of b.tasks || []) rows.push(taskRow(t.id, t.name, t));
     }
   } else rows.push(...(s.tasks||[]).map(t => taskRow(t.id, t.name, t)));
