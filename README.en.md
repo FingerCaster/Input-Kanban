@@ -56,7 +56,7 @@ input-kanban --open
 
 Defaults:
 
-- target repository: the current directory where `input-kanban` is launched
+- target repository: the current directory where `input-kanban` is launched; creating a run validates that it is inside a Git work tree
 - host: `127.0.0.1`
 - port: `8787`
 - runs directory: `~/.input-kanban/runs`

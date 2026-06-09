@@ -8,7 +8,7 @@ CLI options take precedence over environment variables. Environment variables ta
 
 - `PORT`: HTTP server port. Default: `8787`. CLI option: `--port`.
 - `HOST`: HTTP bind host. Default: `127.0.0.1`. CLI option: `--host`.
-- `KANBAN_DEFAULT_REPO`: Default target repository path for new runs. Default: the current working directory when `input-kanban` is launched. CLI option: `--repo`.
+- `KANBAN_DEFAULT_REPO`: Default target repository path for new runs. Default: the current working directory when `input-kanban` is launched. CLI option: `--repo`. Creating a run validates that this path is inside a Git work tree.
 - `KANBAN_RUNS_DIR`: Directory for run state, logs, and artifacts. Default: `.input-kanban/runs` under the user's home directory. CLI option: `--runs-dir`.
 - `KANBAN_CODEX_BIN`: Codex CLI executable name or path. Default: `codex`. CLI option: `--codex-bin`.
 - `KANBAN_RUNNER`: Runner mode. Supported values: `headless`, `tmux`. Default: `headless`. CLI option: `--runner`.

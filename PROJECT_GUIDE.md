@@ -67,7 +67,7 @@ Supported options:
 
 Default behavior:
 
-- default repo: current working directory when `input-kanban` is launched;
+- default repo: current working directory when `input-kanban` is launched; run creation validates that the selected repo is inside a Git work tree;
 - default host: `127.0.0.1`;
 - default port: `8787`;
 - default runs directory: `~/.input-kanban/runs`;

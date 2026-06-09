@@ -328,7 +328,11 @@ function renderSelectedHeader() {
   const sandbox = currentState.workerSandbox || 'workspace-write';
   const chips = [
     metaChip('Run ID', currentState.runId, { long: true }),
-    metaChip('仓库', basenamePath(currentState.repo), { title: currentState.repo }),
+    metaChip('仓库', basenamePath(currentState.repo), {
+      title: currentState.repo,
+      long: true,
+      extra: `<button class="secondary copy-btn" title="复制仓库地址" onclick="copyRepoPath(event)">⧉</button>`
+    }),
     metaChip('沙箱', sandbox, { danger: sandbox === 'danger-full-access' }),
     metaChip('开始', formatDateTime(currentState.createdAt)),
     metaChip('用时', `${durationSeconds(currentState.createdAt, runDurationEnd(currentState))} 秒`)
@@ -515,6 +519,18 @@ function hideExecutionSummary() {
   const el = document.getElementById('executionSummary');
   el.classList.add('hidden');
   el.innerHTML = '';
+}
+async function copyRepoPath(event) {
+  event.stopPropagation();
+  const repoPath = currentState?.repo || '';
+  if (!repoPath) return;
+  try {
+    await navigator.clipboard.writeText(repoPath);
+    event.currentTarget.textContent = '已复制';
+    setTimeout(() => { event.currentTarget.textContent = '⧉'; }, 900);
+  } catch {
+    prompt('复制仓库地址', repoPath);
+  }
 }
 async function copyTmuxRunCommand(event) {
   event.stopPropagation();

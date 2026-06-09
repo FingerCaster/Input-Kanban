@@ -78,7 +78,7 @@ async function handleApi(req, res, url, appClient) {
     }
     notFound(res);
   } catch (e) {
-    send(res, 500, { error: e.message });
+    send(res, e.statusCode || 500, { error: e.message });
   }
 }
 

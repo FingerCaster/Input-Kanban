@@ -56,7 +56,7 @@ input-kanban --open
 
 默认值：
 
-- 目标仓库：启动 `input-kanban` 时的当前目录
+- 目标仓库：启动 `input-kanban` 时的当前目录；创建批次时会校验它必须位于 Git work tree 内
 - host：`127.0.0.1`
 - port：`8787`
 - runs 目录：`~/.input-kanban/runs`

@@ -30,6 +30,9 @@ test('selected run header uses compact metadata chips', () => {
   assert.match(html, /\.run-card-meta/);
   assert.match(script, /metaChip\('Run ID', currentState\.runId/);
   assert.match(script, /metaChip\('仓库', basenamePath\(currentState\.repo\)/);
+  assert.match(script, /copyRepoPath\(event\)/);
+  assert.match(script, /title="复制仓库地址"/);
+  assert.match(script, /event\.currentTarget\.textContent = '⧉'/);
   assert.match(script, /metaChip\('终端', tmuxSessionName\(currentState\)/);
   assert.match(script, /metaChip\('用时', `\$\{durationSeconds\(currentState\.createdAt, runDurationEnd\(currentState\)\)\} 秒`\)/);
   assert.match(script, /function runDurationEnd\(s\)/);
@@ -85,6 +88,7 @@ test('tmux generated badges are not shown in run/task panels', () => {
 test('tmux copy action is only exposed at run attach level', () => {
   assert.match(script, /return state\?\.tmux\?\.tmuxAttachCommand \|\| `tmux attach-session -t \$\{tmuxSessionName\(state\)\}`/);
   assert.match(script, /copyTmuxRunCommand\(event\)/);
+  assert.match(script, /async function copyRepoPath\(event\)/);
   assert.doesNotMatch(script, /copyTmuxCommand/);
   assert.doesNotMatch(script, /select-window/);
 });

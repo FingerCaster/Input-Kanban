@@ -1,6 +1,8 @@
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import {
   DEFAULT_REPO, RUNS_DIR, ensureDir, nowIso, makeRunId, readJson,
   writeJsonAtomic, fileInfo, readTextMaybe, extractFirstJsonObject, listRunDirs,
@@ -10,6 +12,7 @@ import { matchThreadToMarkers } from './appServerClient.js';
 import { formatCodexEventsJsonl } from './eventFormatter.js';
 import { defaultRunner } from './runners/index.js';
 
+const execFileAsync = promisify(execFile);
 const runner = defaultRunner;
 const VALID_SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 
@@ -22,13 +25,33 @@ function normalizeSandbox(value, fallback = 'workspace-write') {
 function statePath(runDir) { return path.join(runDir, 'run_state.json'); }
 function planPath(runDir) { return path.join(runDir, 'plan.json'); }
 
+function userInputError(message) {
+  const error = new Error(message);
+  error.statusCode = 400;
+  return error;
+}
+
+async function assertGitWorkTree(repo) {
+  const resolvedRepo = path.resolve(repo || DEFAULT_REPO);
+  let stat;
+  try { stat = await fsp.stat(resolvedRepo); }
+  catch { throw userInputError(`target repository does not exist: ${resolvedRepo}`); }
+  if (!stat.isDirectory()) throw userInputError(`target repository is not a directory: ${resolvedRepo}`);
+  try {
+    const { stdout } = await execFileAsync('git', ['-C', resolvedRepo, 'rev-parse', '--is-inside-work-tree'], { timeout: 5000 });
+    if (stdout.trim() === 'true') return resolvedRepo;
+  } catch {}
+  throw userInputError(`target repository is not a git work tree: ${resolvedRepo}`);
+}
+
 export async function createRun({ label = 'task', taskText = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write' } = {}) {
+  const resolvedRepo = await assertGitWorkTree(repo);
   const runId = makeRunId(label);
   const runDir = pathForRun(runId);
   await ensureDir(runDir);
   await fsp.writeFile(path.join(runDir, 'task.md'), taskText || '');
   const state = {
-    runId, label, repo: path.resolve(repo), maxParallel: Number(maxParallel) || 3, workerSandbox: normalizeSandbox(workerSandbox),
+    runId, label, repo: resolvedRepo, maxParallel: Number(maxParallel) || 3, workerSandbox: normalizeSandbox(workerSandbox),
     runner: RUNNER,
     status: 'created', createdAt: nowIso(), updatedAt: nowIso(),
     planner: { status: 'pending' }, batches: [], tasks: [], judge: { status: 'pending' }
