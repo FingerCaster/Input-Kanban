@@ -46,6 +46,7 @@ function shellQuote(value) {
 
 const BIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin');
 const FORMATTER_BIN = path.join(BIN_DIR, 'input-kanban-format-events.js');
+const TIMESTAMP_BIN = path.join(BIN_DIR, 'input-kanban-timestamp-events.js');
 const OVERVIEW_BIN = path.join(BIN_DIR, 'input-kanban-tmux-overview.js');
 
 function buildOverviewCommand(runStatePath) {
@@ -54,7 +55,7 @@ function buildOverviewCommand(runStatePath) {
   return `while true; do clear; node ${quotedOverviewBin} ${quotedStatePath}; sleep 2; done`;
 }
 
-function buildRunScript({ codexBin, formatterBin = FORMATTER_BIN, sandbox, cwd, outDir, runId, taskId, role }) {
+function buildRunScript({ codexBin, formatterBin = FORMATTER_BIN, timestampBin = TIMESTAMP_BIN, sandbox, cwd, outDir, runId, taskId, role }) {
   return `#!/usr/bin/env bash
 set -u
 
@@ -67,15 +68,17 @@ TASK_ID=${shellQuote(taskId)}
 ROLE=${shellQuote(role)}
 PROMPT_FILE="$OUT_DIR/prompt.md"
 EVENTS="$OUT_DIR/events.jsonl"
+TIMED_EVENTS="$OUT_DIR/events_timed.jsonl"
 STDERR_LOG="$OUT_DIR/stderr.log"
 FORMATTER_BIN=${shellQuote(formatterBin)}
+TIMESTAMP_BIN=${shellQuote(timestampBin)}
 LAST_MESSAGE="$OUT_DIR/last_message.md"
 EXIT_CODE="$OUT_DIR/exit_code"
 
 cd "$CWD"
 rm -f "$EXIT_CODE"
-touch "$EVENTS" "$STDERR_LOG"
-"$CODEX_BIN" exec --json --sandbox "$SANDBOX" -C "$CWD" -o "$LAST_MESSAGE" "$(<"$PROMPT_FILE")" > >(tee -a "$EVENTS" | node "$FORMATTER_BIN") 2> >(tee -a "$STDERR_LOG" >&2)
+touch "$EVENTS" "$TIMED_EVENTS" "$STDERR_LOG"
+"$CODEX_BIN" exec --json --sandbox "$SANDBOX" -C "$CWD" -o "$LAST_MESSAGE" "$(<"$PROMPT_FILE")" > >(node "$TIMESTAMP_BIN" "$EVENTS" "$TIMED_EVENTS" | node "$FORMATTER_BIN") 2> >(tee -a "$STDERR_LOG" >&2)
 code=$?
 printf '%s' "$code" > "$EXIT_CODE"
 printf '\\nInput Kanban tmux task completed.\\n'

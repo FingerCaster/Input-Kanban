@@ -4,8 +4,10 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Input 看板</title>
-  <link rel="icon" type="image/png" sizes="32x32" href="/assets/input-kanban-favicon-32.png" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/assets/input-kanban-apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/input-kanban-favicon-32.png?v=2" />
+  <link rel="shortcut icon" type="image/png" href="/assets/input-kanban-favicon-32.png?v=2" />
+  <link rel="mask-icon" href="/assets/input-kanban-mask-icon.svg" color="#2563eb" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/assets/input-kanban-apple-touch-icon.png?v=2" />
   <style>
     :root { --bg:#0b1220; --panel:#111827; --panel-2:#0f172a; --line:#334155; --line-strong:#64748b; --text:#e2e8f0; --muted:#94a3b8; --blue:#2563eb; --green:#166534; --red:#991b1b; --gray:#475569; --orange:#b45309; }
     body { font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: var(--bg); color: var(--text); }
@@ -66,6 +68,7 @@
     .run-card:hover { border-color: var(--line-strong); background: #162033; transform: translateY(-1px); }
     .run-card.active { border-color: #60a5fa; box-shadow: inset 3px 0 0 #60a5fa; }
     .run-card-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: flex-start; font-weight: 800; }
+    .run-card-name-wrap { min-width: 0; display: flex; align-items: flex-start; gap: 6px; }
     .run-card-name { min-width: 0; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
     .run-card-title .pill { flex: 0 0 auto; }
     .run-card-id { margin-top: 5px; word-break: break-all; }
@@ -84,12 +87,21 @@
     .log-panel { margin-top: 16px; }
     .file-tabs button { font-size: 13px; }
     .copy-btn { padding: 2px 6px; margin: 0 0 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.2; background: var(--gray); vertical-align: middle; }
+    .rename-btn { opacity: 0; pointer-events: none; transition: opacity .15s ease; }
+    .run-card:hover .rename-btn, .run-card:focus-within .rename-btn, .build-title:hover .rename-btn, .build-title:focus-within .rename-btn, .rename-btn:focus { opacity: 1; pointer-events: auto; }
+    .icon-svg { width: 14px; height: 14px; display: block; }
     .session-cell { word-break: break-all; }
     .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
     .row-actions .danger, .row-actions .secondary { margin: 0; }
     .status-stack { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 5px; }
-    .execution-summary { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 -2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px 10px 0 0; background: #020617; color: var(--muted); font-size: 12px; }
+    .execution-summary { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 -2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px 10px 0 0; background: #020617; color: var(--muted); font-size: 12px; }
     .execution-summary.hidden { display: none; }
+    .summary-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; padding: 4px 7px; border: 1px solid var(--line); border-radius: 999px; background: #0f172a; color: #cbd5e1; line-height: 1.2; }
+    .summary-chip.command-type { background: rgba(37,99,235,.12); border-color: rgba(96,165,250,.35); }
+    .summary-break { flex-basis: 100%; height: 0; }
+    .summary-label { color: var(--muted); font-weight: 800; }
+    .summary-value { color: #e2e8f0; font-weight: 800; }
+    .summary-duration { color: #bfdbfe; font-weight: 800; }
     .execution-summary + pre { border-top-left-radius: 0; border-top-right-radius: 0; }
     .notice { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: #1f2937; color: #cbd5e1; }
     .notice.warning { border-color: #92400e; background: rgba(180,83,9,.18); }
@@ -97,6 +109,10 @@
     .floating-copy-btn { position: absolute; top: 8px; left: 8px; z-index: 2; opacity: 0; pointer-events: none; transition: opacity .15s; padding: 5px 8px; background: rgba(71,85,105,.92); }
     .file-content-wrap:hover .floating-copy-btn:not(.hidden), .floating-copy-btn:focus { opacity: 1; pointer-events: auto; }
     .floating-copy-btn:not(.hidden) + pre { padding-top: 42px; }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(2,6,23,.72); }
+    .modal-backdrop.hidden { display: none; }
+    .modal-card { width: min(760px, 100%); border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 18px 60px rgba(0,0,0,.38); padding: 16px; }
+    .modal-card textarea { min-height: 220px; }
   </style>
 </head>
 <body>
@@ -153,21 +169,35 @@
     </section>
 
     <section id="filePanel" class="log-panel">
-      <h2>文件查看</h2>
-      <div id="fileTitle" class="muted">点击任务后选择文件</div>
+      <h2>任务详情</h2>
+      <div id="fileTitle" class="muted">点击任务后查看详情</div>
       <div id="fileTabs" class="toolbar file-tabs"></div>
       <div id="executionSummary" class="execution-summary hidden"></div>
       <div class="file-content-wrap">
-        <button id="copyLastMessageBtn" class="secondary copy-btn floating-copy-btn hidden" title="复制最终回复内容" onclick="copyFileContent(event)">⧉</button>
+        <button id="copyLastMessageBtn" class="secondary copy-btn floating-copy-btn hidden" title="复制当前内容" onclick="copyFileContent(event)">⧉</button>
         <pre id="fileContent"></pre>
       </div>
     </section>
   </div>
 </main>
+<div id="manualCompleteModal" class="modal-backdrop hidden">
+  <div class="modal-card">
+    <h2>手动标记成功</h2>
+    <div id="manualCompleteTitle" class="muted"></div>
+    <label>人工成功执行结果</label>
+    <textarea id="manualCompleteResult" placeholder="粘贴 codex resume 后的最终回复、验证结果、关键证据或 artifact 路径"></textarea>
+    <div class="muted">该内容会保存为 manual_result.md，显示在“结果”中，并作为 final judge 的人工成功证据。</div>
+    <div class="toolbar">
+      <button onclick="submitManualComplete()">确认标记成功</button>
+      <button class="secondary" onclick="closeManualCompleteModal()">取消</button>
+    </div>
+  </div>
+</div>
 <script>
 let selectedRun = null;
 let selectedTask = null;
 let selectedFileName = null;
+let manualCompleteTaskId = null;
 let currentState = null;
 let lastAutoRefreshAt = null;
 let runListVisibleCount = 10;
@@ -178,9 +208,25 @@ const RUN_LIST_PAGE_SIZE = 10;
 
 async function api(path, opts={}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const error = new Error(await res.text());
+    error.status = res.status;
+    throw error;
+  }
   const ct = res.headers.get('content-type') || '';
   return ct.includes('application/json') ? res.json() : res.text();
+}
+function errorDetail(error) {
+  const message = error?.message || String(error || '');
+  try { return JSON.parse(message).error || message; }
+  catch { return message; }
+}
+function userFacingErrorMessage(error) {
+  const detail = errorDetail(error);
+  if (/planner already running/i.test(detail)) return '任务拆分正在进行中，请稍后查看结果。';
+  if (/judge already running/i.test(detail)) return '验收正在进行中，请稍后查看结果。';
+  if (/already running/i.test(detail)) return '任务正在进行中，请稍后查看结果。';
+  return error?.message || String(error);
 }
 const statusText = {
   created: '已创建', pending: '等待中', planning: '拆分中', planned: '已拆分',
@@ -222,13 +268,16 @@ function runDurationEnd(s) {
     ...(s.tasks || []).flatMap(task => [task.endedAt, task.completedAt, task.stoppedAt])
   ]) || s.updatedAt;
 }
-function runTimingText(s) { return `开始时刻 ${formatDateTime(s.createdAt)}｜用时 ${durationSeconds(s.createdAt, runDurationEnd(s))} 秒`; }
+function runTimingText(s) { return `开始时刻 ${formatDateTime(s.createdAt)}｜用时 ${formatDurationMs(durationSeconds(s.createdAt, runDurationEnd(s)) * 1000)}`; }
 function basenamePath(value) {
   const parts = String(value || '').split(/[\\/]/).filter(Boolean);
   return parts.at(-1) || value || '-';
 }
 function metaChip(label, value, { title = value, danger = false, long = false, extra = '' } = {}) {
   return `<span class="meta-chip ${danger ? 'danger' : ''} ${long ? 'long' : ''}" title="${esc(title)}"><span class="meta-label">${esc(label)}</span><span class="meta-value">${esc(value)}</span>${extra}</span>`;
+}
+function editIcon() {
+  return '<svg class="icon-svg" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5Z" fill="currentColor"/><path d="m16 4.5 3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 }
 function isTmuxMode() { return currentState?.runner === 'tmux'; }
 function taskById(id) {
@@ -249,6 +298,14 @@ function hasRunTmuxMetadata(state = currentState) {
 function runAttachCommand(state = currentState) {
   if (!hasRunTmuxMetadata(state)) return '';
   return state?.tmux?.tmuxAttachCommand || `tmux attach-session -t ${tmuxSessionName(state)}`;
+}
+function runCardDurationEnd(run) {
+  const cached = statusByRunId.get(run.runId);
+  if (cached) return runDurationEnd(cached);
+  return run.durationEnd || null;
+}
+function runCardDurationText(run) {
+  return formatDurationMs(durationSeconds(run.createdAt, runCardDurationEnd(run)) * 1000);
 }
 function runListHasTmuxMetadata(run) {
   if (run?.runner !== 'tmux') return false;
@@ -282,6 +339,8 @@ async function createRun() {
   clearFileView();
   hideCreateForm();
   await refreshRuns(); await refreshSelected();
+  await api(`/api/runs/${selectedRun}/plan`, { method: 'POST' });
+  await refreshSelected();
 }
 async function refreshRuns() {
   const data = await api('/api/runs');
@@ -292,10 +351,11 @@ function renderRunList() {
   const visibleRuns = latestRuns.slice(0, runListVisibleCount);
   const cards = visibleRuns.map(r => `
     <div class="run-card ${selectedRun === r.runId ? 'active' : ''}" onclick="selectRun('${r.runId}')">
-      <div class="run-card-title"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><span>${pill(r.status)}</span></div>
+      <div class="run-card-title"><span class="run-card-name-wrap"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, '${r.runId}')">${editIcon()}</button></span><span>${pill(r.status)}</span></div>
       <div class="run-card-meta">
-        ${metaChip('Run ID', r.runId, { long: true })}
+        ${metaChip('仓库', basenamePath(r.repo), { title: r.repo, long: true, extra: `<button class="secondary copy-btn" title="复制仓库地址" onclick="copyRunRepoPath(event, '${r.runId}')">⧉</button>` })}
         ${metaChip('创建', formatDateTime(r.createdAt))}
+        ${metaChip('用时', runCardDurationText(r))}
         ${metaChip('进度', `${r.completed}/${r.total}`)}
         ${metaChip('执行中', r.running)}
         ${metaChip('失败', r.failed, { danger: Number(r.failed) > 0 })}
@@ -335,7 +395,7 @@ function renderSelectedHeader() {
     }),
     metaChip('沙箱', sandbox, { danger: sandbox === 'danger-full-access' }),
     metaChip('开始', formatDateTime(currentState.createdAt)),
-    metaChip('用时', `${durationSeconds(currentState.createdAt, runDurationEnd(currentState))} 秒`)
+    metaChip('用时', formatDurationMs(durationSeconds(currentState.createdAt, runDurationEnd(currentState)) * 1000))
   ];
   if (currentState.runner === 'tmux') {
     if (hasRunTmuxMetadata(currentState)) {
@@ -349,7 +409,7 @@ function renderSelectedHeader() {
   }
   chips.push(metaChip('刷新', `每 ${AUTO_REFRESH_MS / 1000} 秒`));
   chips.push(metaChip('上次', lastAutoRefreshAt ? lastAutoRefreshAt.toLocaleTimeString() : '尚未触发'));
-  return `<div class="build-title"><span>${esc(currentState.label)}</span>${pill(currentState.status)}</div><div class="build-meta">${chips.join('')}</div>`;
+  return `<div class="build-title"><span>${esc(currentState.label)}</span><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, currentState.runId)">${editIcon()}</button>${pill(currentState.status)}</div><div class="build-meta">${chips.join('')}</div>`;
 }
 async function loadTaskDescription() {
   if (!selectedRun) { document.getElementById('taskDescription').textContent = '未选择任务批次'; return; }
@@ -409,10 +469,17 @@ function sessionCell(thread) {
 function taskStartedCell(t) {
   return t?.startedAt ? formatDateTime(t.startedAt) : '-';
 }
-function taskDurationCell(t) {
-  if (!t?.startedAt) return '-';
+function taskDurationMs(t) {
+  if (!t?.startedAt) return null;
   const end = t.endedAt || t.completedAt || t.stoppedAt || (t.status === 'running' ? null : t.updatedAt);
-  return `${durationSeconds(t.startedAt, end)} 秒`;
+  const endMs = end ? new Date(end).getTime() : Date.now();
+  const startMs = new Date(t.startedAt).getTime();
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return null;
+  return Math.max(0, endMs - startMs);
+}
+function taskDurationCell(t) {
+  const ms = taskDurationMs(t);
+  return ms === null ? '-' : formatDurationMs(ms);
 }
 function processExitCell(t) {
   return `${esc(t?.pid || '-')} / ${esc(t?.exitCode ?? '-')}`;
@@ -468,12 +535,17 @@ async function selectTask(id) {
   document.getElementById('fileTitle').textContent = `${selectedRun} / ${selectedTask}`;
   renderFileTabs();
   renderTasks();
-  if (selectedFileName && fileTabsForSelectedTask().some(([name]) => name === selectedFileName)) await loadFile(selectedFileName);
+  const tabs = fileTabsForSelectedTask();
+  if (selectedFileName && tabs.some(([name]) => name === selectedFileName)) await loadFile(selectedFileName);
   else {
-    selectedFileName = null;
-    document.getElementById('fileContent').textContent = '';
-    hideExecutionSummary();
-    updateCopyLastMessageButton();
+    const defaultTab = tabs.find(([name]) => name === 'events.pretty') || tabs[0];
+    if (defaultTab) await loadFile(defaultTab[0]);
+    else {
+      selectedFileName = null;
+      document.getElementById('fileContent').textContent = '';
+      hideExecutionSummary();
+      updateCopyLastMessageButton();
+    }
   }
 }
 async function loadFile(name, { preserveScroll = false } = {}) {
@@ -481,7 +553,14 @@ async function loadFile(name, { preserveScroll = false } = {}) {
   selectedFileName = name;
   const pre = document.getElementById('fileContent');
   const previousScrollTop = pre.scrollTop;
-  const text = await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=${encodeURIComponent(name)}`);
+  let text;
+  const selected = taskById(selectedTask);
+  if (name === 'result.json' && selected?.manualCompletion?.hasManualResult) {
+    const manualText = await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=manual_result.md`);
+    text = manualText ? `【这次是人工结果】\n\n${manualText}` : await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=${encodeURIComponent(name)}`);
+  } else {
+    text = await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=${encodeURIComponent(name)}`);
+  }
   pre.textContent = text;
   if (preserveScroll) pre.scrollTop = previousScrollTop;
   else pre.scrollTop = 0;
@@ -490,7 +569,7 @@ async function loadFile(name, { preserveScroll = false } = {}) {
   updateCopyLastMessageButton();
 }
 function clearFileView() {
-  document.getElementById('fileTitle').textContent = '点击任务后选择文件';
+  document.getElementById('fileTitle').textContent = '点击任务后查看详情';
   document.getElementById('fileContent').textContent = '';
   const tabs = document.getElementById('fileTabs');
   if (tabs) tabs.innerHTML = '';
@@ -500,7 +579,9 @@ function clearFileView() {
 function updateCopyLastMessageButton() {
   const button = document.getElementById('copyLastMessageBtn');
   if (!button) return;
-  button.classList.toggle('hidden', selectedFileName !== 'last_message.md');
+  const copyableFiles = new Set(['last_message.md', 'verdict.json']);
+  button.classList.toggle('hidden', !copyableFiles.has(selectedFileName));
+  button.title = selectedFileName === 'verdict.json' ? '复制验收结论内容' : '复制最终回复内容';
   button.textContent = '⧉';
 }
 async function copyFileContent(event) {
@@ -520,9 +601,8 @@ function hideExecutionSummary() {
   el.classList.add('hidden');
   el.innerHTML = '';
 }
-async function copyRepoPath(event) {
+async function copyRepoPath(event, repoPath = currentState?.repo || '') {
   event.stopPropagation();
-  const repoPath = currentState?.repo || '';
   if (!repoPath) return;
   try {
     await navigator.clipboard.writeText(repoPath);
@@ -531,6 +611,10 @@ async function copyRepoPath(event) {
   } catch {
     prompt('复制仓库地址', repoPath);
   }
+}
+async function copyRunRepoPath(event, runId) {
+  const repoPath = latestRuns.find(run => run.runId === runId)?.repo || '';
+  await copyRepoPath(event, repoPath);
 }
 async function copyTmuxRunCommand(event) {
   event.stopPropagation();
@@ -547,32 +631,109 @@ async function copyTmuxRunCommand(event) {
 async function renderExecutionSummary() {
   const el = document.getElementById('executionSummary');
   let raw = '';
+  let timedRaw = '';
   try { raw = await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=events.jsonl`); }
   catch { raw = ''; }
-  const summary = summarizeEventsJsonl(raw);
+  try { timedRaw = await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=events_timed.jsonl`); }
+  catch { timedRaw = ''; }
+  const task = taskById(selectedTask);
+  const taskMs = taskDurationMs(task);
+  const summary = summarizeEventsJsonl(timedRaw || raw, { taskMs });
+  const taskDuration = taskDurationCell(task);
+  const statChip = (label, value) => `<span class="summary-chip"><span class="summary-label">${esc(label)}</span><span class="summary-value">${esc(value)}</span></span>`;
+  const commandTypeChips = summary.commandTypes.length
+    ? summary.commandTypes.map(item => `<span class="summary-chip command-type"><span class="summary-value">${esc(item.kind)}</span><span>${item.count}次</span><span class="summary-duration">${esc(item.durationText)}</span><span>占比 ${esc(item.percentText)}</span></span>`).join('')
+    : '<span class="summary-chip command-type"><span class="summary-value">-</span></span>';
   el.classList.remove('hidden');
-  el.innerHTML = `<span>事件 ${summary.events}</span><span>命令开始 ${summary.commandStarted}</span><span>命令完成 ${summary.commandCompleted}</span><span>MCP ${summary.mcpCalls}</span><span>文件变更 ${summary.fileChanges}</span><span>模型回复 ${summary.agentMessages}</span><span>推理 ${summary.reasoning}</span><span>命令类型 ${esc(summary.commandKindsText)}</span><button class="secondary copy-btn" onclick="scrollFileToBottom()">跳到末尾</button>`;
+  el.innerHTML = `${statChip('任务用时', taskDuration)}${statChip('命令用时', summary.commandDurationText)}${statChip('模型/调度', summary.modelOrchestrationText)}${statChip('启动/收尾', summary.startFinishText)}${statChip('事件', summary.events)}${statChip('命令开始', summary.commandStarted)}${statChip('命令完成', summary.commandCompleted)}${statChip('模型回复', summary.agentMessages)}${statChip('推理', summary.reasoning)}${statChip('MCP', summary.mcpCalls)}${statChip('文件变更', summary.fileChanges)}${statChip('系统事件', summary.systemEvents)}<span class="summary-break"></span><span class="summary-label">命令类型</span>${commandTypeChips}<button class="secondary copy-btn" onclick="scrollFileToBottom()">跳到末尾</button>`;
 }
-function summarizeEventsJsonl(raw) {
-  const summary = { events: 0, commandStarted: 0, commandCompleted: 0, mcpCalls: 0, fileChanges: 0, agentMessages: 0, reasoning: 0, commandKinds: new Map(), commandKindsText: '-' };
+function eventTimeMs(event) {
+  const value = event.receivedAt ?? event.timestamp ?? event.time ?? event.created_at ?? event.createdAt ?? event.ts;
+  if (typeof value === 'number' && Number.isFinite(value)) return value > 1e12 ? value : value * 1000;
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+function formatDurationMs(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return '-';
+  if (ms < 1000) return `${Math.round(ms)}毫秒`;
+  const seconds = ms / 1000;
+  if (seconds < 60) return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}秒`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = Math.round(seconds % 60);
+  return `${minutes}分${String(rest).padStart(2, '0')}秒`;
+}
+function summarizeEventsJsonl(raw, { taskMs = null } = {}) {
+  const summary = { events: 0, commandStarted: 0, commandCompleted: 0, mcpCalls: 0, fileChanges: 0, agentMessages: 0, reasoning: 0, systemEvents: 0, commandKinds: new Map(), commandKindsText: '-', commandTypes: [], eventDurationText: '-', commandDurationText: '-', modelOrchestrationText: '-', startFinishText: '-' };
+  const commandStarts = new Map();
+  const commandCountsByKind = new Map();
+  const commandDurationsByKind = new Map();
+  let firstEventMs = null;
+  let lastEventMs = null;
+  let commandDurationTotalMs = 0;
   for (const line of String(raw || '').split(/\r?\n/).filter(Boolean)) {
     let event;
     try { event = JSON.parse(line); } catch { continue; }
+    const envelopeTimeMs = eventTimeMs(event);
+    event = event.event || event;
     summary.events++;
+    const timeMs = envelopeTimeMs ?? eventTimeMs(event);
+    if (timeMs !== null) {
+      firstEventMs = firstEventMs === null ? timeMs : Math.min(firstEventMs, timeMs);
+      lastEventMs = lastEventMs === null ? timeMs : Math.max(lastEventMs, timeMs);
+    }
     const item = event.item || {};
     const type = item.type || '';
     if (type === 'command_execution') {
-      if (event.type === 'item.started') summary.commandStarted++;
-      if (event.type === 'item.completed') summary.commandCompleted++;
+      const commandId = item.id || `command-${summary.commandStarted + summary.commandCompleted}`;
       const kind = commandKind(item.command || 'unknown');
+      if (event.type === 'item.started') {
+        summary.commandStarted++;
+        if (timeMs !== null) commandStarts.set(commandId, { timeMs, kind });
+      }
+      if (event.type === 'item.completed') {
+        summary.commandCompleted++;
+        const started = commandStarts.get(commandId);
+        const completedKind = started?.kind || kind;
+        commandCountsByKind.set(completedKind, (commandCountsByKind.get(completedKind) || 0) + 1);
+        const inlineDuration = Number(item.duration_ms ?? item.durationMs ?? event.duration_ms ?? event.durationMs);
+        let durationMs = null;
+        if (Number.isFinite(inlineDuration) && inlineDuration >= 0) durationMs = inlineDuration;
+        else if (timeMs !== null && started && Number.isFinite(started.timeMs)) durationMs = Math.max(0, timeMs - started.timeMs);
+        if (durationMs !== null) {
+          commandDurationTotalMs += durationMs;
+          const current = commandDurationsByKind.get(completedKind) || { ms: 0, count: 0 };
+          commandDurationsByKind.set(completedKind, { ms: current.ms + durationMs, count: current.count + 1 });
+        }
+      }
       summary.commandKinds.set(kind, (summary.commandKinds.get(kind) || 0) + 1);
     }
-    if (type === 'mcp_tool_call' || type === 'mcpToolCall') summary.mcpCalls++;
-    if (type === 'file_change' || type === 'fileChange') summary.fileChanges++;
-    if (type === 'agent_message' || type === 'agentMessage') summary.agentMessages++;
-    if (type === 'reasoning') summary.reasoning++;
+    else if (type === 'mcp_tool_call' || type === 'mcpToolCall') summary.mcpCalls++;
+    else if (type === 'file_change' || type === 'fileChange') summary.fileChanges++;
+    else if (type === 'agent_message' || type === 'agentMessage') summary.agentMessages++;
+    else if (type === 'reasoning') summary.reasoning++;
+    else summary.systemEvents++;
   }
-  const kinds = [...summary.commandKinds.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  let eventDurationMs = null;
+  if (firstEventMs !== null && lastEventMs !== null) {
+    eventDurationMs = Math.max(0, lastEventMs - firstEventMs);
+    summary.eventDurationText = formatDurationMs(eventDurationMs);
+  }
+  if (commandDurationTotalMs > 0) summary.commandDurationText = formatDurationMs(commandDurationTotalMs);
+  if (eventDurationMs !== null) summary.modelOrchestrationText = formatDurationMs(Math.max(0, eventDurationMs - commandDurationTotalMs));
+  if (eventDurationMs !== null && Number.isFinite(taskMs) && taskMs >= 0) summary.startFinishText = formatDurationMs(Math.max(0, taskMs - eventDurationMs));
+  const commandTypeNames = new Set([...commandCountsByKind.keys(), ...commandDurationsByKind.keys()]);
+  summary.commandTypes = [...commandTypeNames].map(kind => {
+    const duration = commandDurationsByKind.get(kind);
+    return {
+      kind,
+      count: commandCountsByKind.get(kind) || duration?.count || 0,
+      durationMs: duration?.ms ?? null,
+      durationText: duration ? formatDurationMs(duration.ms) : '-',
+      percentText: duration && Number.isFinite(taskMs) && taskMs > 0 ? `${Math.round((duration.ms / taskMs) * 100)}%` : '-'
+    };
+  }).sort((a, b) => b.count - a.count || (b.durationMs || 0) - (a.durationMs || 0)).slice(0, 6);
+  const kinds = summary.commandTypes.map(item => [item.kind, item.count]);
   summary.commandKindsText = kinds.length ? kinds.map(([kind, count]) => `${kind}:${count}`).join(' / ') : '-';
   return summary;
 }
@@ -602,12 +763,32 @@ async function copySessionId(event, thread) {
     prompt('复制 Codex 会话ID', thread);
   }
 }
+function labelForRun(runId) {
+  if (currentState?.runId === runId) return currentState.label || '';
+  return (latestRuns.find(run => run.runId === runId)?.label) || '';
+}
+async function renameRunLabel(event, runId = selectedRun) {
+  event.stopPropagation();
+  if (!runId) return;
+  const nextLabel = prompt('修改任务批次名称', labelForRun(runId));
+  if (nextLabel === null) return;
+  const label = nextLabel.trim();
+  if (!label) { alert('任务批次名称不能为空'); return; }
+  await runAction(async () => {
+    await api(`/api/runs/${runId}/label`, { method: 'PATCH', body: JSON.stringify({ label }) });
+    if (selectedRun === runId) await refreshSelected();
+    else await refreshRuns();
+  });
+}
 async function planRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/plan`, {method:'POST'}); await refreshSelected(); }); }
 async function dispatchRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/dispatch`, {method:'POST'}); await refreshSelected(); }); }
 async function judgeRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/judge`, {method:'POST'}); await refreshSelected(); }); }
 async function runAction(fn) {
   try { await fn(); }
-  catch (error) { alert(error.message || String(error)); }
+  catch (error) {
+    console.error('操作失败', error);
+    alert(userFacingErrorMessage(error));
+  }
 }
 async function stopSelectedRun() {
   if (!selectedRun) return;
@@ -640,15 +821,29 @@ async function markTaskCompleted(event, taskId) {
   if (!selectedRun || taskId === 'planner' || taskId === 'judge') return;
   const task = (currentState?.tasks || []).find(t => t.id === taskId);
   if (task?.status === 'running') { alert('任务仍在执行中，不能手动标记成功。'); return; }
-  const ok = confirm(`确认将任务 ${taskId} 手动标记为成功？\n\n请仅在你已经通过 CLI / Codex 会话确认该任务实际完成时使用。\n原始状态会保留在页面和 manual_completion.json 中。`);
-  if (!ok) return;
-  selectedTask = taskId;
+  manualCompleteTaskId = taskId;
+  document.getElementById('manualCompleteTitle').textContent = `${selectedRun} / ${taskId}`;
+  document.getElementById('manualCompleteResult').value = '';
+  document.getElementById('manualCompleteModal').classList.remove('hidden');
+  setTimeout(() => document.getElementById('manualCompleteResult').focus(), 0);
+}
+function closeManualCompleteModal() {
+  manualCompleteTaskId = null;
+  document.getElementById('manualCompleteModal').classList.add('hidden');
+}
+async function submitManualComplete() {
+  const taskId = manualCompleteTaskId;
+  if (!selectedRun || !taskId) return;
+  const resultText = document.getElementById('manualCompleteResult').value.trim();
+  if (!resultText) { alert('请粘贴人工成功执行结果。'); return; }
   await api(`/api/runs/${selectedRun}/tasks/${taskId}/mark-completed`, {
     method: 'POST',
-    body: JSON.stringify({ reason: 'manual success confirmed from dashboard' })
+    body: JSON.stringify({ reason: 'manual success confirmed from dashboard', resultText })
   });
+  closeManualCompleteModal();
+  selectedTask = taskId;
   await refreshSelected();
-  await loadFile('manual_completion.json');
+  await loadFile('result.json');
 }
 
 loadHealth().then(refreshRuns);

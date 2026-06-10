@@ -356,7 +356,18 @@ export async function archiveRun(runId, { reason = 'archived by user' } = {}) {
   return state;
 }
 
-export async function markTaskCompleted(runId, taskId, { reason = 'manual success confirmed by user' } = {}) {
+export async function renameRun(runId, { label = '' } = {}) {
+  const state = await loadRun(runId);
+  if (!state) throw new Error(`run not found: ${runId}`);
+  const nextLabel = String(label || '').trim();
+  if (!nextLabel) throw userInputError('run label cannot be empty');
+  state.label = nextLabel;
+  state.renamedAt = nowIso();
+  await saveRun(state);
+  return state;
+}
+
+export async function markTaskCompleted(runId, taskId, { reason = 'manual success confirmed by user', resultText = '' } = {}) {
   const state = await loadRun(runId);
   if (!state) throw new Error(`run not found: ${runId}`);
   const task = (state.tasks || []).find(t => t.id === taskId);
@@ -366,6 +377,8 @@ export async function markTaskCompleted(runId, taskId, { reason = 'manual succes
   const outDir = roleDir(runDir, 'worker', task.id);
   await ensureDir(outDir);
   if (task.status !== 'completed') {
+    const manualResult = String(resultText || '').trim();
+    if (manualResult) await fsp.writeFile(path.join(outDir, 'manual_result.md'), manualResult);
     const override = {
       type: 'manual_task_completed',
       runId,
@@ -375,6 +388,9 @@ export async function markTaskCompleted(runId, taskId, { reason = 'manual succes
       previousStatus: task.status,
       previousExitCode: task.exitCode ?? null,
       reason,
+      hasManualResult: !!manualResult,
+      manualResultFile: manualResult ? 'manual_result.md' : null,
+      manualResultPreview: manualResult ? manualResult.slice(0, 500) : '',
       markedAt: nowIso()
     };
     await writeJsonAtomic(path.join(outDir, 'manual_completion.json'), override);
@@ -579,11 +595,13 @@ async function standardFiles(dir) {
   return {
     prompt: await fileInfo(path.join(dir, 'prompt.md')),
     events: await fileInfo(path.join(dir, 'events.jsonl')),
+    timedEvents: await fileInfo(path.join(dir, 'events_timed.jsonl')),
     stderr: await fileInfo(path.join(dir, 'stderr.log')),
     lastMessage: await fileInfo(path.join(dir, 'last_message.md')),
     exitCode: await fileInfo(path.join(dir, 'exit_code')),
     runScript: await fileInfo(path.join(dir, 'run.sh')),
-    tmux: await fileInfo(path.join(dir, 'tmux.json'))
+    tmux: await fileInfo(path.join(dir, 'tmux.json')),
+    manualResult: await fileInfo(path.join(dir, 'manual_result.md'))
   };
 }
 
@@ -674,6 +692,7 @@ async function buildJudgeInput(state) {
       resultJson: await readJson(path.join(dir, 'result.json'), null),
       evidenceJson: await readJson(path.join(dir, 'evidence.json'), null),
       manualCompletion: task.manualCompletion || await readJson(path.join(dir, 'manual_completion.json'), null),
+      manualResult: await readTextMaybe(path.join(dir, 'manual_result.md'), 200000),
       tmux: task.tmux || null,
       stderrTail: await readTextMaybe(path.join(dir, 'stderr.log'), 20000)
     });
@@ -738,9 +757,22 @@ async function enrichFromAppServer(state, appClient) {
   }
 }
 
+function runDurationEndOfState(s) {
+  const terminalStatuses = new Set(['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped']);
+  if (!terminalStatuses.has(s.status)) return null;
+  const times = [
+    s.stoppedAt,
+    s.stopInfo?.stoppedAt,
+    s.judge?.endedAt,
+    s.planner?.endedAt,
+    ...(s.tasks || []).flatMap(task => [task.endedAt, task.completedAt, task.stoppedAt])
+  ].map(value => Date.parse(value || '')).filter(Number.isFinite);
+  return times.length ? new Date(Math.max(...times)).toISOString() : s.updatedAt;
+}
+
 function summaryOfRun(s) {
   const tasks = s.tasks || [];
-  return { runId: s.runId, label: s.label, repo: s.repo, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
+  return { runId: s.runId, label: s.label, repo: s.repo, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
 }
 
 export async function readRunTaskText(runId) {
@@ -749,7 +781,7 @@ export async function readRunTaskText(runId) {
 
 export async function readRunFile(runId, taskId, name) {
   const runDir = pathForRun(runId);
-  const allowed = new Set(['prompt.md','events.jsonl','events.pretty','stderr.log','last_message.md','exit_code','result.json','evidence.json','verdict.json','judge_input.json','manual_completion.json','run.sh','tmux.json']);
+  const allowed = new Set(['prompt.md','events.jsonl','events_timed.jsonl','events.pretty','stderr.log','last_message.md','exit_code','result.json','evidence.json','verdict.json','judge_input.json','manual_completion.json','manual_result.md','run.sh','tmux.json']);
   if (!allowed.has(name)) throw new Error('file not allowed');
   let dir;
   if (taskId === 'planner') dir = roleDir(runDir, 'planner');

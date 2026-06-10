@@ -179,9 +179,10 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
   const script = await fsp.readFile(path.join(outDir, 'run.sh'), 'utf8');
   assert.match(script, /CODEX_BIN='\/usr\/local\/bin\/codex'/);
   assert.match(script, /\$CODEX_BIN" exec --json --sandbox/);
-  assert.match(script, /touch "\$EVENTS" "\$STDERR_LOG"/);
+  assert.match(script, /touch "\$EVENTS" "\$TIMED_EVENTS" "\$STDERR_LOG"/);
   assert.match(script, /FORMATTER_BIN='/);
-  assert.match(script, /> >\(tee -a "\$EVENTS" \| node "\$FORMATTER_BIN"\) 2> >\(tee -a "\$STDERR_LOG" >&2\)/);
+  assert.match(script, /TIMESTAMP_BIN='/);
+  assert.match(script, /> >\(node "\$TIMESTAMP_BIN" "\$EVENTS" "\$TIMED_EVENTS" \| node "\$FORMATTER_BIN"\) 2> >\(tee -a "\$STDERR_LOG" >&2\)/);
   assert.match(script, /printf '%s' "\$code" > "\$EXIT_CODE"/);
   assert.match(script, /RUN_ID='run_01'/);
   assert.match(script, /TASK_ID='planner'/);
@@ -328,5 +329,7 @@ test('headless runner does not generate tmux keep-open run script', async () => 
   await assert.rejects(() => fsp.readFile(path.join(outDir, 'run.sh'), 'utf8'), { code: 'ENOENT' });
   const events = await fsp.readFile(path.join(outDir, 'events.jsonl'), 'utf8');
   assert.doesNotMatch(events, /Type exit or press Ctrl-D to close this tmux window/);
+  const timedEvents = await fsp.readFile(path.join(outDir, 'events_timed.jsonl'), 'utf8');
+  assert.match(timedEvents, /"receivedAt"/);
   assert.equal(await fsp.readFile(path.join(outDir, 'exit_code'), 'utf8'), '0');
 });

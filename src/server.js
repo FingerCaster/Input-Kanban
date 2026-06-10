@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CodexAppServerClient } from './appServerClient.js';
 import { APP_ROOT, DEFAULT_REPO, RUNNER, RUNS_DIR } from './utils.js';
-import { createRun, listRuns, startPlanner, dispatchRun, startJudge, refreshRun, readRunFile, readRunTaskText, markTaskCompleted, stopRun, archiveRun } from './orchestrator.js';
+import { createRun, listRuns, startPlanner, dispatchRun, startJudge, refreshRun, readRunFile, readRunTaskText, markTaskCompleted, stopRun, archiveRun, renameRun } from './orchestrator.js';
 
 const PUBLIC_DIR = path.join(APP_ROOT, 'public');
 
@@ -65,6 +65,10 @@ async function handleApi(req, res, url, appClient) {
       if (parts.length === 4 && parts[3] === 'archive' && req.method === 'POST') {
         const body = await readBody(req);
         return send(res, 200, await archiveRun(runId, body));
+      }
+      if (parts.length === 4 && parts[3] === 'label' && req.method === 'PATCH') {
+        const body = await readBody(req);
+        return send(res, 200, await renameRun(runId, body));
       }
       if (parts.length === 4 && parts[3] === 'task-text' && req.method === 'GET') return send(res, 200, await readRunTaskText(runId), 'text/plain');
       if (parts.length === 6 && parts[3] === 'tasks' && parts[5] === 'file' && req.method === 'GET') {

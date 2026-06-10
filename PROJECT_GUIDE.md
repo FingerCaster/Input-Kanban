@@ -147,6 +147,7 @@ Recovery options:
 - Inspect `events.pretty`, `stderr.log`, `last_message.md`, and artifacts.
 - Manually mark `failed` or `unknown` workers as completed if the user confirms the work is actually done.
 - Manual completion writes `workers/<taskId>/manual_completion.json`.
+- If the user pastes a manual success result, it is saved as `workers/<taskId>/manual_result.md` and included in final judge input.
 - The UI preserves the original failed or unknown status while also showing the manual completion marker.
 
 ## Stop and Archive
@@ -255,6 +256,8 @@ runs/<runId>/planner/
 runs/<runId>/planner_attempts/attempt-XX/
 runs/<runId>/workers/<taskId>/
 runs/<runId>/judge/judge_input.json
+runs/<runId>/workers/<taskId>/events_timed.jsonl
+runs/<runId>/workers/<taskId>/manual_result.md
 runs/<runId>/judge/verdict.json
 ```
 
@@ -271,6 +274,7 @@ runs/<runId>/judge/verdict.json
 - `POST /api/runs/:runId/judge`
 - `POST /api/runs/:runId/stop`
 - `POST /api/runs/:runId/archive`
+- `PATCH /api/runs/:runId/label`
 - `GET /api/runs/:runId/task-text`
 - `GET /api/runs/:runId/tasks/:taskId/file?name=...`
 - `POST /api/runs/:runId/tasks/:taskId/mark-completed`
@@ -336,7 +340,7 @@ notes or handoff.
 1. Headless runner:
    - Start the app with `input-kanban --runner headless --runs-dir <tmp-runs-dir> --repo <target-repo> --port <free-port>`.
    - Create a small run, plan it, dispatch at least one worker, and run the final judge if the plan requires it.
-   - Verify the run state reports `runner: headless`, no task exposes `tmux` metadata, and role directories contain the expected `prompt.md`, `events.jsonl`, `stderr.log`, `last_message.md`, and `exit_code` files.
+   - Verify the run state reports `runner: headless`, no task exposes `tmux` metadata, and role directories contain the expected `prompt.md`, `events.jsonl`, `events_timed.jsonl`, `stderr.log`, `last_message.md`, and `exit_code` files.
    - Stop the run and verify no unrelated local process is affected.
 
 2. tmux runner, only when `tmux -V` succeeds:
@@ -353,6 +357,10 @@ notes or handoff.
    - Run `npm pack --dry-run`.
    - Verify the package includes `bin/`, `src/`, `public/`, `README.md`, `README.en.md`, `PROJECT_GUIDE.md`, `ENVIRONMENT.md`, and `package.json`.
    - Verify no runtime run directories, local logs, or unrelated temporary artifacts are included.
+
+## Release Notes
+
+Keep a single repository-level `RELEASE_NOTES.md` with recent version history. Do not add one tracked `RELEASE_NOTES.vX.Y.Z.md` file per release. When creating a GitHub Release, use a temporary notes file or copy the relevant version section from `RELEASE_NOTES.md` into `gh release create --notes-file`.
 
 ## Change Guidelines
 
