@@ -51,9 +51,9 @@ The npm CLI entry is:
 bin/input-kanban.js
 ```
 
-It parses CLI options, sets environment variables before importing backend modules, and starts the HTTP server.
+It parses CLI options and sets environment variables before importing backend modules. Without a subcommand, or with `serve`, it starts the HTTP server. With `submit`, it creates a run directly in the shared runs directory and can optionally run an auto loop.
 
-Supported options:
+Supported serve options:
 
 ```text
 --host <host>
@@ -61,9 +61,61 @@ Supported options:
 --repo <path>
 --runs-dir <path>
 --codex-bin <path>
+--runner <headless|tmux>
 --open
 --no-open
 ```
+
+Supported status options:
+
+```text
+[runId]
+--runs-dir <path>
+--watch
+--poll-ms <ms>
+```
+
+`input-kanban status` refreshes and prints a run summary. If no `runId` is provided, it uses the latest run from the shared runs directory. `--watch` keeps polling until the run reaches a terminal state.
+
+Supported result options:
+
+```text
+[runId]
+--runs-dir <path>
+--copy
+```
+
+`input-kanban result [runId]` prints the final judge result. It prefers `judge/verdict.json` and falls back to `judge/last_message.md`. If no `runId` is provided, it uses the latest run. `--copy` sends the result to the system clipboard.
+
+Supported stop options:
+
+```text
+<runId>
+--runs-dir <path>
+--reason <text>
+```
+
+`input-kanban stop <runId>` calls the same orchestrator stop path as the Web dashboard. Stop requires an explicit run id. The backend first asks the active runner to stop known processes and then falls back to killing live stored PIDs, so Web and CLI processes can stop each other's headless workers.
+
+Supported submit options:
+
+```text
+--repo <path>
+--label <label>
+--task <text>
+--task-file <path|->
+--max-parallel <n>
+--worker-sandbox <read-only|workspace-write|danger-full-access>
+--runner <headless|tmux>
+--runs-dir <path>
+--auto
+--no-auto
+--detach / -d
+--watch
+--poll-ms <ms>
+```
+
+`input-kanban submit` creates a run and starts the planner. Task content can come from `--task <text>` or `--task-file <path|->`; omitting `--repo` uses the current working directory as the target Git work tree. Omitting `--label` derives the run label from the first non-empty task line. Auto mode is the default for submit: it keeps polling the run, dispatches batches when the plan is ready, and starts the final judge once all batches complete. `--no-auto` keeps submit to create + plan only. `-d` / `--detach` starts a background supervisor process for the auto loop and lets the submitting terminal return immediately. The submit output includes `input-kanban status <runId> --watch` for terminal-side observation. Because it writes to the same runs directory as the Web server, CLI-created runs are visible in the 8787 dashboard when both processes use the same `--runs-dir`.
 
 Default behavior:
 

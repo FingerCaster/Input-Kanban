@@ -1,5 +1,22 @@
 # Release Notes
 
+## v0.0.8
+
+### Highlights
+
+- Add CLI `submit` workflow with two task input modes: `--task-file <markdown>` for Markdown files and `--task <text>` for inline task text.
+- Add CLI auto loop as the default `submit` behavior to create a run, start planning, dispatch batches, and run the final judge while keeping the run visible in the shared Web dashboard.
+- Add CLI `-d` / `--detach` to run the auto loop in a background supervisor, plus `--no-auto` for create-and-plan-only mode.
+- Add CLI `status [runId] [--watch]`, defaulting to the latest run when `runId` is omitted.
+- Add CLI `result [runId] [--copy]` to print or copy the final judge result.
+- Add CLI `stop <runId>` and make backend stop robust across CLI/Web processes by falling back to stored live PIDs.
+- Derive the run label from task text when `--label` / form label is omitted.
+- Add dashboard run-card archive confirmation without modal popups and replace the detail refresh text chips with a one-shot circle animation.
+
+### Verification
+
+- `npm run check` passed with 51 tests.
+
 ## v0.0.7
 
 ### Highlights

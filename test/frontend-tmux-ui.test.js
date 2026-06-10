@@ -26,6 +26,9 @@ test('create form exposes worker sandbox selector', () => {
   assert.match(script, /api\(`\/api\/runs\/\$\{selectedRun\}\/plan`, \{ method: 'POST' \}\)/);
   assert.match(script, /planner already running\/i\.test\(detail\)\) return '任务拆分正在进行中，请稍后查看结果。'/);
   assert.match(script, /console\.error\('操作失败', error\)/);
+  assert.match(script, /任务仍在执行中，请先停止后再归档。/);
+  assert.match(script, /async function archiveRunById\(runId, \{ confirmFirst = true \} = \{\}\)/);
+  assert.match(script, /await archiveRunById\(runId, \{ confirmFirst: false \}\)/);
   assert.match(script, /metaChip\('沙箱', sandbox/);
   assert.match(script, /danger: sandbox === 'danger-full-access'/);
 });
@@ -42,7 +45,10 @@ test('selected run header uses compact metadata chips', () => {
   assert.match(script, /metaChip\('用时', formatDurationMs\(durationSeconds\(currentState\.createdAt, runDurationEnd\(currentState\)\) \* 1000\)\)/);
   assert.match(script, /function runDurationEnd\(s\)/);
   assert.match(script, /terminalStatuses\.has\(s\.status\)/);
-  assert.match(script, /metaChip\('刷新', `每 \$\{AUTO_REFRESH_MS \/ 1000\} 秒`\)/);
+  assert.match(html, /\.refresh-pulse-chip/);
+  assert.match(html, /@keyframes refresh-spin/);
+  assert.match(script, /function refreshPulseChip\(\)/);
+  assert.match(script, /requestAnimationFrame\(triggerRefreshPulse\)/);
   assert.doesNotMatch(script, /durationSeconds\(currentState\.createdAt, currentState\.updatedAt\)/);
   assert.match(script, /copyRunRepoPath\(event, '\$\{r\.runId\}'\)/);
   assert.match(script, /metaChip\('仓库', basenamePath\(r\.repo\)/);
@@ -55,8 +61,15 @@ test('selected run header uses compact metadata chips', () => {
   assert.match(script, /renameRunLabel\(event, '\$\{r\.runId\}'\)/);
   assert.match(html, /\.rename-btn \{ opacity: 0; pointer-events: none/);
   assert.match(html, /\.run-card:hover \.rename-btn/);
+  assert.match(html, /\.archive-confirm-btn \{ min-width: 46px/);
   assert.match(script, /function editIcon\(\)/);
+  assert.match(script, /function archiveIcon\(\)/);
   assert.match(script, /class="icon-svg"/);
+  assert.match(script, /archiveRunFromCard\(event, '\$\{r\.runId\}'\)/);
+  assert.match(script, /onmouseleave="clearArchiveConfirm\('\$\{r\.runId\}'\)"/);
+  assert.match(script, /pendingArchiveRunId === r\.runId \? '确认' : archiveIcon\(\)/);
+  assert.match(script, /归档任务批次（运行中请先停止）/);
+  assert.match(script, /再次点击确认归档/);
   assert.match(script, /class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel\(event, currentState\.runId\)">\$\{editIcon\(\)\}/);
   assert.doesNotMatch(script, />✎/);
   assert.match(script, /prompt\('修改任务批次名称'/);

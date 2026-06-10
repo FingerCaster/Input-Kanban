@@ -17,6 +17,17 @@ process.env.KANBAN_RUNS_DIR = path.join(tmp, 'runs');
 process.env.KANBAN_RUNNER = 'headless';
 const { createRun, listRuns, loadRun, markTaskCompleted, readRunFile, renameRun } = await import(`../src/orchestrator.js?create-sandbox=${Date.now()}`);
 
+test('createRun derives a label from task text when omitted', async () => {
+  const state = await createRun({ repo, taskText: '请修复登录问题，并补充回归测试\n\n更多细节' });
+  assert.equal(state.label, '请修复登录问题，并补充回归测试');
+  assert.match(state.runId, /^run_.*_run_/);
+});
+
+test('createRun truncates derived labels by display width', async () => {
+  const state = await createRun({ repo, taskText: '请按两批完成任务：第一批并行生成三个随机整数，第二批求和并判断是否为十的倍数' });
+  assert.equal(state.label, '请按两批完成任务：第一批并行生成三个随机…');
+});
+
 test('createRun stores default worker sandbox', async () => {
   const state = await createRun({ label: 'default sandbox', repo, taskText: 'noop' });
   assert.equal(state.workerSandbox, 'workspace-write');

@@ -84,11 +84,17 @@
     .meta-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .meta-chip.long .meta-value { max-width: min(680px, 72vw); }
     .meta-chip .copy-btn { margin-left: 2px; }
+    .refresh-pulse-chip { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 999px; background: #020617; }
+    .refresh-pulse-dot { width: 12px; height: 12px; border: 2px solid #60a5fa; border-top-color: transparent; border-radius: 999px; opacity: .62; }
+    .refresh-pulse-chip.pulse .refresh-pulse-dot { animation: refresh-spin .8s ease-out; }
+    @keyframes refresh-spin { 0% { transform: rotate(0deg) scale(.75); opacity: 1; } 70% { transform: rotate(300deg) scale(1.18); opacity: 1; } 100% { transform: rotate(360deg) scale(1); opacity: .62; } }
     .log-panel { margin-top: 16px; }
     .file-tabs button { font-size: 13px; }
     .copy-btn { padding: 2px 6px; margin: 0 0 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.2; background: var(--gray); vertical-align: middle; }
     .rename-btn { opacity: 0; pointer-events: none; transition: opacity .15s ease; }
     .run-card:hover .rename-btn, .run-card:focus-within .rename-btn, .build-title:hover .rename-btn, .build-title:focus-within .rename-btn, .rename-btn:focus { opacity: 1; pointer-events: auto; }
+    .run-card-title-actions { display: inline-flex; align-items: center; gap: 3px; }
+    .archive-confirm-btn { min-width: 46px; padding: 4px 10px; border-color: rgba(248,113,113,.85); background: var(--red) !important; color: white; font-weight: 900; }
     .icon-svg { width: 14px; height: 14px; display: block; }
     .session-cell { word-break: break-all; }
     .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
@@ -198,6 +204,7 @@ let selectedRun = null;
 let selectedTask = null;
 let selectedFileName = null;
 let manualCompleteTaskId = null;
+let pendingArchiveRunId = null;
 let currentState = null;
 let lastAutoRefreshAt = null;
 let runListVisibleCount = 10;
@@ -226,6 +233,7 @@ function userFacingErrorMessage(error) {
   if (/planner already running/i.test(detail)) return '任务拆分正在进行中，请稍后查看结果。';
   if (/judge already running/i.test(detail)) return '验收正在进行中，请稍后查看结果。';
   if (/already running/i.test(detail)) return '任务正在进行中，请稍后查看结果。';
+  if (/cannot archive.*running/i.test(detail)) return '任务仍在执行中，请先停止后再归档。';
   return error?.message || String(error);
 }
 const statusText = {
@@ -278,6 +286,9 @@ function metaChip(label, value, { title = value, danger = false, long = false, e
 }
 function editIcon() {
   return '<svg class="icon-svg" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5Z" fill="currentColor"/><path d="m16 4.5 3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+}
+function archiveIcon() {
+  return '<svg class="icon-svg" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 5h16v4H4V5Z" fill="currentColor"/><path d="M6 10h12v9H6v-9Z" fill="currentColor" opacity=".72"/><path d="M9 13h6" stroke="#020617" stroke-width="2" stroke-linecap="round"/></svg>';
 }
 function isTmuxMode() { return currentState?.runner === 'tmux'; }
 function taskById(id) {
@@ -350,8 +361,8 @@ async function refreshRuns() {
 function renderRunList() {
   const visibleRuns = latestRuns.slice(0, runListVisibleCount);
   const cards = visibleRuns.map(r => `
-    <div class="run-card ${selectedRun === r.runId ? 'active' : ''}" onclick="selectRun('${r.runId}')">
-      <div class="run-card-title"><span class="run-card-name-wrap"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, '${r.runId}')">${editIcon()}</button></span><span>${pill(r.status)}</span></div>
+    <div class="run-card ${selectedRun === r.runId ? 'active' : ''}" onclick="selectRun('${r.runId}')" onmouseleave="clearArchiveConfirm('${r.runId}')">
+      <div class="run-card-title"><span class="run-card-name-wrap"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><span class="run-card-title-actions"><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, '${r.runId}')">${editIcon()}</button><button class="secondary copy-btn rename-btn ${pendingArchiveRunId === r.runId ? 'archive-confirm-btn' : ''}" title="${pendingArchiveRunId === r.runId ? '再次点击确认归档' : '归档任务批次（运行中请先停止）'}" onclick="archiveRunFromCard(event, '${r.runId}')">${pendingArchiveRunId === r.runId ? '确认' : archiveIcon()}</button></span></span><span>${pill(r.status)}</span></div>
       <div class="run-card-meta">
         ${metaChip('仓库', basenamePath(r.repo), { title: r.repo, long: true, extra: `<button class="secondary copy-btn" title="复制仓库地址" onclick="copyRunRepoPath(event, '${r.runId}')">⧉</button>` })}
         ${metaChip('创建', formatDateTime(r.createdAt))}
@@ -377,6 +388,7 @@ async function refreshSelected({auto=false} = {}) {
   statusByRunId.set(selectedRun, currentState);
   if (auto) lastAutoRefreshAt = new Date();
   document.getElementById('selected').innerHTML = renderSelectedHeader();
+  if (auto) requestAnimationFrame(triggerRefreshPulse);
   updateAutoRefreshHint();
   updateRunNotice();
   await loadTaskDescription();
@@ -407,13 +419,23 @@ function renderSelectedHeader() {
       chips.push(metaChip('终端', 'tmux 现场尚未生成'));
     }
   }
-  chips.push(metaChip('刷新', `每 ${AUTO_REFRESH_MS / 1000} 秒`));
-  chips.push(metaChip('上次', lastAutoRefreshAt ? lastAutoRefreshAt.toLocaleTimeString() : '尚未触发'));
+  chips.push(refreshPulseChip());
   return `<div class="build-title"><span>${esc(currentState.label)}</span><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, currentState.runId)">${editIcon()}</button>${pill(currentState.status)}</div><div class="build-meta">${chips.join('')}</div>`;
 }
 async function loadTaskDescription() {
   if (!selectedRun) { document.getElementById('taskDescription').textContent = '未选择任务批次'; return; }
   document.getElementById('taskDescription').textContent = await api(`/api/runs/${selectedRun}/task-text`);
+}
+function refreshPulseChip() {
+  const last = lastAutoRefreshAt ? lastAutoRefreshAt.toLocaleTimeString() : '尚未触发';
+  return `<span id="refreshPulse" class="refresh-pulse-chip" title="自动刷新：每 ${AUTO_REFRESH_MS / 1000} 秒；上次 ${esc(last)}"><span class="refresh-pulse-dot"></span></span>`;
+}
+function triggerRefreshPulse() {
+  const el = document.getElementById('refreshPulse');
+  if (!el) return;
+  el.classList.remove('pulse');
+  void el.offsetWidth;
+  el.classList.add('pulse');
 }
 function updateRunNotice() {
   const el = document.getElementById('runNotice');
@@ -800,21 +822,46 @@ async function stopSelectedRun() {
   });
   await refreshSelected();
 }
+function clearArchiveConfirm(runId) {
+  if (pendingArchiveRunId !== runId) return;
+  pendingArchiveRunId = null;
+  renderRunList();
+}
+async function archiveRunFromCard(event, runId) {
+  event.stopPropagation();
+  if (pendingArchiveRunId !== runId) {
+    pendingArchiveRunId = runId;
+    renderRunList();
+    return;
+  }
+  pendingArchiveRunId = null;
+  await archiveRunById(runId, { confirmFirst: false });
+}
+async function archiveRunById(runId, { confirmFirst = true } = {}) {
+  if (!runId) return;
+  if (confirmFirst) {
+    const ok = confirm('确认归档当前任务批次？\n\n归档后会从默认任务批次列表隐藏。若仍有任务运行，请先停止。');
+    if (!ok) return;
+  }
+  await runAction(async () => {
+    await api(`/api/runs/${runId}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({ reason: 'archived from dashboard' })
+    });
+    if (selectedRun === runId) {
+      selectedRun = null; selectedTask = null; selectedFileName = null; currentState = null;
+      document.getElementById('selected').textContent = '未选择任务批次';
+      document.getElementById('taskDescription').textContent = '未选择任务批次';
+      document.getElementById('tasks').innerHTML = '';
+      clearFileView();
+      updateAutoRefreshHint();
+    }
+    await refreshRuns();
+  });
+}
 async function archiveSelectedRun() {
   if (!selectedRun) return;
-  const ok = confirm('确认归档当前任务批次？\n\n归档后会从默认任务批次列表隐藏。若仍有任务运行，请先停止。');
-  if (!ok) return;
-  await api(`/api/runs/${selectedRun}/archive`, {
-    method: 'POST',
-    body: JSON.stringify({ reason: 'archived from dashboard' })
-  });
-  selectedRun = null; selectedTask = null; selectedFileName = null; currentState = null;
-  document.getElementById('selected').textContent = '未选择任务批次';
-  document.getElementById('taskDescription').textContent = '未选择任务批次';
-  document.getElementById('tasks').innerHTML = '';
-  clearFileView();
-  updateAutoRefreshHint();
-  await refreshRuns();
+  await archiveRunById(selectedRun);
 }
 async function markTaskCompleted(event, taskId) {
   event.stopPropagation();

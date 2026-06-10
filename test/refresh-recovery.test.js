@@ -37,7 +37,7 @@ test('refreshRun materializes a completed planner when tmux exit_code arrived be
   });
   await fsp.writeFile(path.join(plannerDir, 'exit_code'), '0');
   await fsp.writeFile(path.join(plannerDir, 'last_message.md'), JSON.stringify({
-    tasks: [{ id: 'T-01', name: 'task', prompt: 'do task', sandbox: 'read-only', expectedArtifacts: [] }]
+    tasks: [{ id: 'T-01', name: 'task', prompt: 'do task', sandbox: 'read-only', expectedArtifacts: ['result.json'] }]
   }));
 
   const state = await refreshRun(runId);
@@ -48,6 +48,122 @@ test('refreshRun materializes a completed planner when tmux exit_code arrived be
   assert.equal(state.tasks[0].id, 'T-01');
   const plan = JSON.parse(await fsp.readFile(path.join(runDir, 'plan.json'), 'utf8'));
   assert.equal(plan.tasks[0].id, 'T-01');
+  assert.equal(plan.tasks[0].expectedArtifacts[0], '.orchestrator/run_recover_planner/T-01/result.json');
+});
+
+test('refreshRun gives a missing worker runner a grace period before unknown', async () => {
+  const runId = 'run_missing_worker_grace';
+  const runDir = path.join(tmp, runId);
+  const workerDir = path.join(runDir, 'workers', 'T-01');
+  await fsp.mkdir(workerDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'task.md'), 'missing worker grace');
+  const task = { id: 'T-01', batchId: 'batch-1', name: 'task', prompt: 'do task', sandbox: 'read-only', expectedArtifacts: [], status: 'running' };
+  await writeJson(path.join(runDir, 'run_state.json'), {
+    runId,
+    label: 'missing worker grace',
+    repo: tmp,
+    maxParallel: 1,
+    runner: 'tmux',
+    status: 'running',
+    createdAt: '2026-06-09T00:00:00.000Z',
+    updatedAt: '2026-06-09T00:00:00.000Z',
+    planner: { status: 'completed' },
+    batches: [{ id: 'batch-1', name: 'batch', maxParallel: 1, status: 'running', tasks: [task] }],
+    tasks: [task],
+    judge: { status: 'pending' }
+  });
+
+  const state = await refreshRun(runId);
+
+  assert.equal(state.tasks[0].status, 'running');
+  assert.ok(state.tasks[0].missingRunnerAt);
+});
+
+test('refreshRun marks a missing worker unknown after the grace period', async () => {
+  const runId = 'run_missing_worker_after_grace';
+  const runDir = path.join(tmp, runId);
+  const workerDir = path.join(runDir, 'workers', 'T-01');
+  await fsp.mkdir(workerDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'task.md'), 'missing worker after grace');
+  const task = { id: 'T-01', batchId: 'batch-1', name: 'task', prompt: 'do task', sandbox: 'read-only', expectedArtifacts: [], status: 'running', missingRunnerAt: '2026-06-09T00:00:00.000Z' };
+  await writeJson(path.join(runDir, 'run_state.json'), {
+    runId,
+    label: 'missing worker after grace',
+    repo: tmp,
+    maxParallel: 1,
+    runner: 'tmux',
+    status: 'running',
+    createdAt: '2026-06-09T00:00:00.000Z',
+    updatedAt: '2026-06-09T00:00:00.000Z',
+    planner: { status: 'completed' },
+    batches: [{ id: 'batch-1', name: 'batch', maxParallel: 1, status: 'running', tasks: [task] }],
+    tasks: [task],
+    judge: { status: 'pending' }
+  });
+
+  const state = await refreshRun(runId);
+
+  assert.equal(state.tasks[0].status, 'unknown');
+  assert.equal(state.status, 'batch_blocked');
+});
+
+test('refreshRun recovers an unknown worker when its pid is still alive', async () => {
+  const runId = 'run_recover_unknown_worker_live_pid';
+  const runDir = path.join(tmp, runId);
+  const workerDir = path.join(runDir, 'workers', 'T-01');
+  await fsp.mkdir(workerDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'task.md'), 'recover live pid');
+  const task = { id: 'T-01', batchId: 'batch-1', name: 'task', prompt: 'do task', sandbox: 'read-only', expectedArtifacts: [], status: 'unknown', pid: process.pid };
+  await writeJson(path.join(runDir, 'run_state.json'), {
+    runId,
+    label: 'recover live pid',
+    repo: tmp,
+    maxParallel: 1,
+    runner: 'tmux',
+    status: 'batch_blocked',
+    createdAt: '2026-06-09T00:00:00.000Z',
+    updatedAt: '2026-06-09T00:00:00.000Z',
+    planner: { status: 'completed' },
+    batches: [{ id: 'batch-1', name: 'batch', maxParallel: 1, status: 'failed', tasks: [task] }],
+    tasks: [task],
+    judge: { status: 'pending' }
+  });
+
+  const state = await refreshRun(runId);
+
+  assert.equal(state.tasks[0].status, 'running');
+  assert.equal(state.status, 'running');
+});
+
+test('refreshRun recovers an unknown worker when exit_code arrives later', async () => {
+  const runId = 'run_recover_unknown_worker';
+  const runDir = path.join(tmp, runId);
+  const workerDir = path.join(runDir, 'workers', 'T-01');
+  await fsp.mkdir(workerDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'task.md'), 'recover unknown worker');
+  const task = { id: 'T-01', batchId: 'batch-1', name: 'task', prompt: 'do task', sandbox: 'read-only', expectedArtifacts: [], status: 'unknown' };
+  await writeJson(path.join(runDir, 'run_state.json'), {
+    runId,
+    label: 'recover unknown worker',
+    repo: tmp,
+    maxParallel: 1,
+    runner: 'tmux',
+    status: 'running',
+    createdAt: '2026-06-09T00:00:00.000Z',
+    updatedAt: '2026-06-09T00:00:00.000Z',
+    planner: { status: 'completed' },
+    batches: [{ id: 'batch-1', name: 'batch', maxParallel: 1, status: 'running', tasks: [task] }],
+    tasks: [task],
+    judge: { status: 'pending' }
+  });
+  await fsp.writeFile(path.join(workerDir, 'exit_code'), '0');
+  await fsp.writeFile(path.join(workerDir, 'last_message.md'), 'done');
+
+  const state = await refreshRun(runId);
+
+  assert.equal(state.tasks[0].status, 'completed');
+  assert.equal(state.batches[0].tasks[0].status, 'completed');
+  assert.equal(state.status, 'batches_completed');
 });
 
 test('refreshRun writes verdict.json for a completed judge when callback was missed', async () => {

@@ -43,6 +43,46 @@ If you do not want to `cd` into the target repository first, pass it explicitly:
 input-kanban --repo /path/to/your/repo
 ```
 
+## CLI Auto Execution
+
+To submit a task from the terminal and let it advance automatically, use `submit`. Task content supports two input modes:
+
+```bash
+input-kanban submit --task-file task.md --label "Fix login issue"
+input-kanban submit --task "Fix the login issue and add regression tests" --label "Fix login issue"
+```
+
+`submit` creates a run, starts planning, dispatches all batches, and starts the final judge after all workers finish by default. The default repo is the current directory. If `--label` is omitted, the run label is generated from the task text. It uses the same runs directory, so CLI-created runs are visible in the Web dashboard on port 8787 as long as the dashboard uses the same `--runs-dir`.
+
+To return immediately and let a background supervisor continue the auto loop, pass `-d` / `--detach`:
+
+```bash
+input-kanban submit --task-file task.md -d
+```
+
+To create the run and start planning without dispatching or judging, pass `--no-auto`.
+
+Common examples:
+
+```bash
+input-kanban submit --task "Fix login issue"
+input-kanban submit --task-file task.md --max-parallel 2 --worker-sandbox workspace-write
+input-kanban submit --runs-dir ~/.input-kanban/runs --runner tmux -d
+```
+
+Check and stop:
+
+```bash
+input-kanban status
+input-kanban status --watch
+input-kanban status <runId> --watch
+input-kanban result
+input-kanban result <runId> --copy
+input-kanban stop <runId>
+```
+
+Without a `runId`, `status` and `result` use the latest run by default. `result --copy` copies the final judge result. Stopping requires an explicit `runId` to avoid stopping the wrong run.
+
 ## Common Startup Options
 
 ```bash
@@ -76,7 +116,7 @@ After run-level tmux metadata is available, the dashboard shows `Copy tmux attac
 1. Click `New Run`.
 2. Enter a label, target repository, worker sandbox, and task description.
 3. Click `Create Run`.
-4. Click `Plan` to let the Codex planner generate batches and workers.
+4. The dashboard automatically starts `Plan` so the Codex planner can generate batches and workers.
 5. Click `Dispatch` to run workers by batch barrier and concurrency limits.
 6. Inspect execution logs, final messages, error logs, and artifacts.
 7. After all batches complete, click `Final Judge`.

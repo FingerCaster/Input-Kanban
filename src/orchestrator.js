@@ -15,6 +15,8 @@ import { defaultRunner } from './runners/index.js';
 const execFileAsync = promisify(execFile);
 const runner = defaultRunner;
 const VALID_SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
+const MISSING_RUNNER_GRACE_MS = 10000;
+const MAX_DERIVED_LABEL_DISPLAY_WIDTH = 40;
 
 function normalizeSandbox(value, fallback = 'workspace-write') {
   const sandbox = String(value || '').trim();
@@ -25,10 +27,79 @@ function normalizeSandbox(value, fallback = 'workspace-write') {
 function statePath(runDir) { return path.join(runDir, 'run_state.json'); }
 function planPath(runDir) { return path.join(runDir, 'plan.json'); }
 
+function shouldMarkRunnerUnknown(target) {
+  const missingSince = Date.parse(target.missingRunnerAt || '');
+  if (!Number.isFinite(missingSince)) {
+    target.missingRunnerAt = nowIso();
+    return false;
+  }
+  return Date.now() - missingSince >= MISSING_RUNNER_GRACE_MS;
+}
+
+function clearMissingRunner(target) {
+  delete target.missingRunnerAt;
+}
+
+function isPidAlive(pid) {
+  const value = Number(pid);
+  if (!Number.isFinite(value) || value <= 0) return false;
+  try {
+    process.kill(value, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+function hasLiveRunnerProcess(state, id, target) {
+  return runner.hasRunning(state.runId, id) || isPidAlive(target?.pid);
+}
+
+function stopPid(pid, signal = 'SIGTERM') {
+  const value = Number(pid);
+  if (!Number.isFinite(value) || value <= 0) return false;
+  try {
+    process.kill(value, signal);
+    if (signal !== 'SIGKILL') setTimeout(() => { if (isPidAlive(value)) stopPid(value, 'SIGKILL'); }, 1000).unref?.();
+    return true;
+  } catch (error) {
+    return error?.code === 'ESRCH';
+  }
+}
+
 function userInputError(message) {
   const error = new Error(message);
   error.statusCode = 400;
   return error;
+}
+
+function charDisplayWidth(char) {
+  return char.codePointAt(0) > 0x2e80 ? 2 : 1;
+}
+
+function truncateDisplayWidth(text, maxWidth) {
+  let width = 0;
+  let result = '';
+  for (const char of text) {
+    const nextWidth = width + charDisplayWidth(char);
+    if (nextWidth > maxWidth) return `${result.trimEnd()}…`;
+    result += char;
+    width = nextWidth;
+  }
+  return result;
+}
+
+function deriveRunLabel(label, taskText) {
+  const explicit = String(label || '').trim();
+  if (explicit) return explicit;
+  const firstLine = String(taskText || '').split(/\r?\n/).map(line => line.trim()).find(Boolean) || 'task';
+  const cleaned = firstLine
+    .replace(/^#{1,6}\s+/, '')
+    .replace(/^[-*+]\s+/, '')
+    .replace(/^\d+[.)、]\s*/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return truncateDisplayWidth(cleaned, MAX_DERIVED_LABEL_DISPLAY_WIDTH) || 'task';
 }
 
 async function assertGitWorkTree(repo) {
@@ -44,14 +115,15 @@ async function assertGitWorkTree(repo) {
   throw userInputError(`target repository is not a git work tree: ${resolvedRepo}`);
 }
 
-export async function createRun({ label = 'task', taskText = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write' } = {}) {
+export async function createRun({ label = '', taskText = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write' } = {}) {
   const resolvedRepo = await assertGitWorkTree(repo);
-  const runId = makeRunId(label);
+  const runLabel = deriveRunLabel(label, taskText);
+  const runId = makeRunId(runLabel);
   const runDir = pathForRun(runId);
   await ensureDir(runDir);
   await fsp.writeFile(path.join(runDir, 'task.md'), taskText || '');
   const state = {
-    runId, label, repo: resolvedRepo, maxParallel: Number(maxParallel) || 3, workerSandbox: normalizeSandbox(workerSandbox),
+    runId, label: runLabel, repo: resolvedRepo, maxParallel: Number(maxParallel) || 3, workerSandbox: normalizeSandbox(workerSandbox),
     runner: RUNNER,
     status: 'created', createdAt: nowIso(), updatedAt: nowIso(),
     planner: { status: 'pending' }, batches: [], tasks: [], judge: { status: 'pending' }
@@ -200,7 +272,17 @@ export async function startPlanner(runId) {
   return state;
 }
 
-function normalizeTask(t, i, batch, defaultSandbox = 'workspace-write') {
+function normalizeExpectedArtifacts(value, runId, taskId) {
+  const artifacts = Array.isArray(value) ? value : [];
+  return artifacts.map(item => String(item || '').trim()).filter(Boolean).map(item => {
+    if (path.isAbsolute(item)) return item;
+    const normalized = item.replace(/^\.\//, '');
+    if (normalized.includes(runId)) return normalized;
+    return path.posix.join('.orchestrator', runId, taskId, normalized);
+  });
+}
+
+function normalizeTask(t, i, batch, defaultSandbox = 'workspace-write', runId = '') {
   const id = safeIdPart(t.id || `T-${String(i + 1).padStart(2, '0')}`);
   return {
     id,
@@ -208,7 +290,7 @@ function normalizeTask(t, i, batch, defaultSandbox = 'workspace-write') {
     name: t.name || t.id || `Task ${i + 1}`,
     prompt: t.prompt || t.instructions || '',
     sandbox: normalizeSandbox(t.sandbox, defaultSandbox),
-    expectedArtifacts: Array.isArray(t.expectedArtifacts) ? t.expectedArtifacts : [],
+    expectedArtifacts: normalizeExpectedArtifacts(t.expectedArtifacts, runId, id),
     status: 'pending'
   };
 }
@@ -240,7 +322,7 @@ async function rotatePlannerAttempt(state, runDir) {
   }];
 }
 
-function normalizePlan(plan, defaultMaxParallel, defaultSandbox = 'workspace-write') {
+function normalizePlan(plan, defaultMaxParallel, defaultSandbox = 'workspace-write', runId = '') {
   if (Array.isArray(plan.batches)) {
     const batches = plan.batches.map((b, bi) => {
       const batch = {
@@ -250,14 +332,14 @@ function normalizePlan(plan, defaultMaxParallel, defaultSandbox = 'workspace-wri
         status: 'pending',
         tasks: []
       };
-      batch.tasks = (Array.isArray(b.tasks) ? b.tasks : []).map((t, ti) => normalizeTask(t, ti, batch, defaultSandbox));
+      batch.tasks = (Array.isArray(b.tasks) ? b.tasks : []).map((t, ti) => normalizeTask(t, ti, batch, defaultSandbox, runId));
       return batch;
     }).filter(b => b.tasks.length);
     return { ...plan, batches, tasks: batches.flatMap(b => b.tasks) };
   }
   if (Array.isArray(plan.tasks)) {
     const batch = { id: 'batch-1', name: '默认批次', maxParallel: Math.max(1, Number(defaultMaxParallel) || 1), status: 'pending', tasks: [] };
-    batch.tasks = plan.tasks.map((t, i) => normalizeTask(t, i, batch, defaultSandbox));
+    batch.tasks = plan.tasks.map((t, i) => normalizeTask(t, i, batch, defaultSandbox, runId));
     return { ...plan, batches: [batch], tasks: batch.tasks };
   }
   return null;
@@ -273,7 +355,7 @@ async function materializePlan(state) {
     state.tasks = [];
     return { ok: false, empty: false, error: state.planner.planParseError };
   }
-  const normalized = normalizePlan(plan, state.maxParallel, state.workerSandbox || 'workspace-write');
+  const normalized = normalizePlan(plan, state.maxParallel, state.workerSandbox || 'workspace-write', state.runId);
   if (!normalized || !Array.isArray(normalized.tasks)) {
     state.planner.planParseError = 'planner JSON did not contain { batches: [...] } or { tasks: [...] }';
     state.batches = [];
@@ -310,6 +392,28 @@ export async function dispatchRun(runId) {
   return state;
 }
 
+function artifactPathForState(state, rel) {
+  return path.isAbsolute(rel) ? rel : path.join(state.repo, rel);
+}
+
+function workerArtifactInstructions(state, task) {
+  const artifacts = task.expectedArtifacts || [];
+  if (!artifacts.length) return '';
+  const lines = artifacts.map(rel => `- ${artifactPathForState(state, rel)}`);
+  return `\n\nRequired output artifacts:\nWrite the following artifact path(s) exactly. Create parent directories if needed.\n${lines.join('\n')}`;
+}
+
+function upstreamArtifactInstructions(state, task) {
+  const currentBatchIndex = (state.batches || []).findIndex(batch => batch.id === task.batchId);
+  if (currentBatchIndex <= 0) return '';
+  const previousTaskIds = new Set((state.batches || []).slice(0, currentBatchIndex).flatMap(batch => (batch.tasks || []).map(item => item.id)));
+  const lines = (state.tasks || [])
+    .filter(item => previousTaskIds.has(item.id))
+    .flatMap(item => (item.expectedArtifacts || []).map(rel => `- ${item.id}: ${artifactPathForState(state, rel)}`));
+  if (!lines.length) return '';
+  return `\n\nAvailable upstream artifacts from completed earlier batches:\n${lines.join('\n')}\nUse only artifacts from this run id: ${state.runId}.`;
+}
+
 async function startWorkerInState(state, task) {
   const runDir = pathForRun(state.runId);
   const outDir = roleDir(runDir, 'worker', task.id);
@@ -317,7 +421,7 @@ async function startWorkerInState(state, task) {
   const fullPrompt = `${marker(state.runId, task.id, 'worker')}
 ORCHESTRATOR_BATCH_ID: ${task.batchId || 'batch-1'}
 
-${task.prompt}
+${task.prompt}${workerArtifactInstructions(state, task)}${upstreamArtifactInstructions(state, task)}
 `;
   const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, batchId: task.batchId || 'batch-1', runStatePath: statePath(runDir), prompt: fullPrompt, sandbox: task.sandbox || state.workerSandbox || 'workspace-write', cwd: state.repo, outDir });
   Object.assign(task, { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir });
@@ -328,11 +432,28 @@ export async function stopRun(runId, { reason = 'stopped by user' } = {}) {
   if (!state) throw new Error(`run not found: ${runId}`);
   const stoppedAt = nowIso();
   await runner.stopRun(runId);
+  const stoppedPids = new Set();
+  const stopTargetPid = target => {
+    const pid = Number(target?.pid);
+    if (Number.isFinite(pid) && pid > 0 && !stoppedPids.has(pid)) {
+      stoppedPids.add(pid);
+      stopPid(pid);
+    }
+  };
   for (const roleState of [state.planner, state.judge]) {
-    if (roleState?.status === 'running') Object.assign(roleState, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
+    if (roleState?.status === 'running') {
+      stopTargetPid(roleState);
+      Object.assign(roleState, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
+    }
   }
   for (const task of state.tasks || []) {
-    if (task.status === 'running') Object.assign(task, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
+    if (task.status === 'running') {
+      stopTargetPid(task);
+      Object.assign(task, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
+    }
+  }
+  for (const batch of state.batches || []) {
+    for (const task of batch.tasks || []) if (task.status === 'running') stopTargetPid(task);
   }
   for (const batch of state.batches || []) {
     if ((batch.tasks || []).some(t => t.status === 'stopped')) batch.status = 'stopped';
@@ -495,9 +616,16 @@ async function refreshRole(state, roleState, dir) {
   if (exit !== '') {
     roleState.exitCode = Number(exit.trim());
     if (!roleState.endedAt && exitInfo.exists) roleState.endedAt = exitInfo.mtime;
-    if (roleState.status === 'running') roleState.status = roleState.exitCode === 0 ? 'completed' : 'failed';
+    clearMissingRunner(roleState);
+    if (['running', 'unknown'].includes(roleState.status)) roleState.status = roleState.exitCode === 0 ? 'completed' : 'failed';
   }
-  else if (roleState.status === 'running' && !runner.hasRunning(state.runId, key)) roleState.status = 'unknown';
+  else if (['running', 'unknown'].includes(roleState.status) && hasLiveRunnerProcess(state, key, roleState)) {
+    roleState.status = 'running';
+    clearMissingRunner(roleState);
+  }
+  else if (roleState.status === 'running' && !hasLiveRunnerProcess(state, key, roleState)) {
+    if (shouldMarkRunnerUnknown(roleState)) roleState.status = 'unknown';
+  } else if (roleState.status === 'running') clearMissingRunner(roleState);
   roleState.files = await standardFiles(dir);
   await attachTmuxMetadata(roleState, dir);
 }
@@ -510,8 +638,14 @@ async function refreshTask(state, task) {
   if (exit !== '') {
     task.exitCode = Number(exit.trim());
     if (!task.endedAt && exitInfo.exists) task.endedAt = exitInfo.mtime;
-    if (task.status === 'running') task.status = task.exitCode === 0 ? 'completed' : 'failed';
-  } else if (task.status === 'running' && !runner.hasRunning(state.runId, task.id)) task.status = 'unknown';
+    clearMissingRunner(task);
+    if (['pending', 'running', 'unknown'].includes(task.status)) task.status = task.exitCode === 0 ? 'completed' : 'failed';
+  } else if (['running', 'unknown'].includes(task.status) && hasLiveRunnerProcess(state, task.id, task)) {
+    task.status = 'running';
+    clearMissingRunner(task);
+  } else if (task.status === 'running' && !hasLiveRunnerProcess(state, task.id, task)) {
+    if (shouldMarkRunnerUnknown(task)) task.status = 'unknown';
+  } else if (task.status === 'running') clearMissingRunner(task);
   task.files = await standardFiles(dir);
   await attachTmuxMetadata(task, dir);
   delete task.attentionHint;

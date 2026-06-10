@@ -1,8 +1,22 @@
+import { spawn } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+
+function isAlive(pid) {
+  try { process.kill(pid, 0); return true; }
+  catch { return false; }
+}
+
+async function waitForExit(child) {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  await Promise.race([
+    new Promise(resolve => child.once('exit', resolve)),
+    new Promise(resolve => setTimeout(resolve, 2000))
+  ]);
+}
 
 test('stop marks running roles and tasks stopped without removing artifacts', async () => {
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-stop-'));
@@ -17,6 +31,8 @@ test('stop marks running roles and tasks stopped without removing artifacts', as
   await fsp.mkdir(workerDir, { recursive: true });
   await fsp.writeFile(path.join(workerDir, 'tmux.json'), '{"sessionName":"input-kanban-run_stop_state"}');
   await fsp.writeFile(path.join(workerDir, 'events.jsonl'), '{"event":"kept"}\n');
+  const externalChild = spawn(process.execPath, ['-e', 'process.on("SIGTERM", () => process.exit(0)); setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  externalChild.unref();
   await fsp.writeFile(path.join(runDir, 'task.md'), 'task');
   await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
     runId,
@@ -32,9 +48,9 @@ test('stop marks running roles and tasks stopped without removing artifacts', as
       id: 'batch-1',
       status: 'running',
       maxParallel: 1,
-      tasks: [{ id: 'T-01', batchId: 'batch-1', status: 'running' }]
+      tasks: [{ id: 'T-01', batchId: 'batch-1', status: 'running', pid: externalChild.pid }]
     }],
-    tasks: [{ id: 'T-01', batchId: 'batch-1', status: 'running' }]
+    tasks: [{ id: 'T-01', batchId: 'batch-1', status: 'running', pid: externalChild.pid }]
   }, null, 2));
 
   const stopped = await stopRun(runId, { reason: 'test stop' });
@@ -46,6 +62,8 @@ test('stop marks running roles and tasks stopped without removing artifacts', as
   assert.equal(stopped.stopInfo.reason, 'test stop');
   assert.equal(await fsp.readFile(path.join(workerDir, 'tmux.json'), 'utf8'), '{"sessionName":"input-kanban-run_stop_state"}');
   assert.equal(await fsp.readFile(path.join(workerDir, 'events.jsonl'), 'utf8'), '{"event":"kept"}\n');
+  await waitForExit(externalChild);
+  assert.equal(isAlive(externalChild.pid), false);
 
   const persisted = await loadRun(runId);
   assert.equal(persisted.status, 'stopped');
