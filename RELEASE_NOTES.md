@@ -1,5 +1,23 @@
 # Release Notes
 
+## v0.0.9
+
+### Highlights
+
+- Add MIT license and include it in the published npm package.
+- Add agent-friendly `--json` output for discovery, status lookup, result reading, stop, submit, and auto commands.
+- Add `runs` / `runs --active` to list visible and active run IDs before querying details.
+- Add `retry <runId> [taskId]` with preserved failed attempts and a one-shot auto retry path for blocked batches.
+- Add per-run `run_state.lock` protection around state writes to reduce CLI/Web/supervisor lost-update races.
+- Keep Web auto mode enabled by default after planning: dispatch planned work and auto-start the final judge while the page is open.
+- Keep CLI auto mode enabled by default for `submit`, with `--no-auto` as the create-and-plan-only escape hatch.
+- Add `result --copy` for copying final judge output, and keep version display in both CLI and Web footer.
+
+### Verification
+
+- `npm run check` passed with 58 tests.
+- `npm pack --dry-run` included the MIT `LICENSE` file.
+
 ## v0.0.8
 
 ### Highlights
@@ -9,13 +27,15 @@
 - Add CLI `-d` / `--detach` to run the auto loop in a background supervisor, plus `--no-auto` for create-and-plan-only mode.
 - Add CLI `status [runId] [--watch]`, defaulting to the latest run when `runId` is omitted.
 - Add CLI `result [runId] [--copy]` to print or copy the final judge result.
+- Add CLI `retry <runId> [taskId]` and automatic one-shot retry for blocked batches while preserving failed worker attempts.
+- Add per-run `run_state.lock` protection around state writes to reduce CLI/Web/supervisor lost-update races.
 - Add CLI `stop <runId>` and make backend stop robust across CLI/Web processes by falling back to stored live PIDs.
 - Derive the run label from task text when `--label` / form label is omitted.
 - Add dashboard run-card archive confirmation without modal popups and replace the detail refresh text chips with a one-shot circle animation.
 
 ### Verification
 
-- `npm run check` passed with 51 tests.
+- `npm run check` passed with 58 tests.
 
 ## v0.0.7
 

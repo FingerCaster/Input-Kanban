@@ -73,15 +73,21 @@ input-kanban submit --runs-dir ~/.input-kanban/runs --runner tmux -d
 Check and stop:
 
 ```bash
+input-kanban runs
+input-kanban --json runs --active
 input-kanban status
 input-kanban status --watch
 input-kanban status <runId> --watch
+input-kanban --json status <runId>
 input-kanban result
 input-kanban result <runId> --copy
+input-kanban --json result <runId>
+input-kanban retry <runId> [taskId]
+input-kanban --json retry <runId> [taskId]
 input-kanban stop <runId>
 ```
 
-Without a `runId`, `status` and `result` use the latest run by default. `result --copy` copies the final judge result. Stopping requires an explicit `runId` to avoid stopping the wrong run.
+Use `runs` to discover visible run batches first; `runs --active` shows only runs that have not reached a terminal state or still have running tasks, which lets an agent find `runId` values before calling `status <runId>`. Without a `runId`, `status` and `result` use the latest run by default. `result --copy` copies the final judge result. `retry` preserves the failed attempt and retries failed/unknown tasks. `--json` is handy for agents/scripts that need structured output. Stopping requires an explicit `runId` to avoid stopping the wrong run.
 
 ## Common Startup Options
 
@@ -117,10 +123,10 @@ After run-level tmux metadata is available, the dashboard shows `Copy tmux attac
 2. Enter a label, target repository, worker sandbox, and task description.
 3. Click `Create Run`.
 4. The dashboard automatically starts `Plan` so the Codex planner can generate batches and workers.
-5. Click `Dispatch` to run workers by batch barrier and concurrency limits.
-6. Inspect execution logs, final messages, error logs, and artifacts.
-7. After all batches complete, click `Final Judge`.
-8. Stop or archive a run when needed, or manually mark a confirmed failed/unknown worker as completed.
+5. After planning completes, Web auto mode dispatches workers by batch barrier and concurrency limits by default.
+6. After all batches complete, Web auto mode starts the final judge by default.
+7. Inspect execution logs, final messages, error logs, and artifacts.
+8. Stop or archive a run when needed, or manually click buttons to retry/advance, or manually mark a confirmed failed/unknown worker as completed.
 
 ## What It Is For
 

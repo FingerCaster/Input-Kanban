@@ -4,9 +4,10 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+const PACKAGE_VERSION = JSON.parse(await fsp.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VALID_RUNNERS = ['headless', 'tmux'];
 const VALID_SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'];
-const COMMANDS = new Set(['serve', 'submit', 'status', 'result', 'stop', 'auto']);
+const COMMANDS = new Set(['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto']);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const STATUS_TEXT = {
   created: '已创建', planning: '拆分中', plan_failed: '拆分失败', plan_empty: '拆分为空', planned: '已拆分',
@@ -28,16 +29,26 @@ function validateSandbox(value, source) {
 }
 
 function splitCommand(argv) {
-  if (argv[0] && COMMANDS.has(argv[0])) return { command: argv[0], rest: argv.slice(1) };
-  return { command: 'serve', rest: argv };
+  let index = 0;
+  const globals = { json: false };
+  while (index < argv.length) {
+    const arg = argv[index];
+    if (arg === '--json' || arg === '-j') { globals.json = true; index++; continue; }
+    break;
+  }
+  const rest = argv.slice(index);
+  if (rest[0] === '--version' || rest[0] === '-v' || rest[0] === 'version') return { command: 'version', rest: rest.slice(1), globals };
+  if (rest[0] && COMMANDS.has(rest[0])) return { command: rest[0], rest: rest.slice(1), globals };
+  return { command: 'serve', rest, globals };
 }
 
 function parseServeArgs(argv) {
-  const args = { host: '127.0.0.1', port: undefined, repo: undefined, runsDir: undefined, codexBin: undefined, runner: undefined, open: false, help: false };
+  const args = { host: '127.0.0.1', port: undefined, repo: undefined, runsDir: undefined, codexBin: undefined, runner: undefined, open: false, json: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--open') args.open = true;
     else if (arg === '--no-open') args.open = false;
     else if (arg === '--host') args.host = next();
@@ -51,12 +62,29 @@ function parseServeArgs(argv) {
   return args;
 }
 
-function parseStatusArgs(argv) {
-  const args = { host: '127.0.0.1', port: 8787, runsDir: undefined, runId: undefined, watch: false, pollMs: 3000, help: false };
+function parseRunsArgs(argv) {
+  const args = { runsDir: undefined, active: false, includeArchived: false, limit: 20, json: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
+    else if (arg === '--runs-dir') args.runsDir = next();
+    else if (arg === '--active') args.active = true;
+    else if (arg === '--include-archived') args.includeArchived = true;
+    else if (arg === '--limit') args.limit = Number(next());
+    else throw new Error(`unknown runs argument: ${arg}`);
+  }
+  return args;
+}
+
+function parseStatusArgs(argv) {
+  const args = { host: '127.0.0.1', port: 8787, runsDir: undefined, runId: undefined, watch: false, json: false, pollMs: 3000, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const next = () => argv[++i];
+    if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--host') args.host = next();
     else if (arg === '--port' || arg === '-p') args.port = Number(next());
     else if (arg === '--runs-dir') args.runsDir = next();
@@ -69,11 +97,12 @@ function parseStatusArgs(argv) {
 }
 
 function parseResultArgs(argv) {
-  const args = { runsDir: undefined, runId: undefined, copy: false, help: false };
+  const args = { runsDir: undefined, runId: undefined, copy: false, json: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--runs-dir') args.runsDir = next();
     else if (arg === '--copy') args.copy = true;
     else if (!arg.startsWith('-') && !args.runId) args.runId = arg;
@@ -82,12 +111,30 @@ function parseResultArgs(argv) {
   return args;
 }
 
-function parseStopArgs(argv) {
-  const args = { runsDir: undefined, runId: undefined, reason: 'stopped from CLI', help: false };
+function parseRetryArgs(argv) {
+  const args = { runsDir: undefined, runId: undefined, taskId: undefined, reason: 'manual retry from CLI', maxRetries: 1, json: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
+    else if (arg === '--runs-dir') args.runsDir = next();
+    else if (arg === '--reason') args.reason = next();
+    else if (arg === '--max-retries') args.maxRetries = Number(next());
+    else if (!arg.startsWith('-') && !args.runId) args.runId = arg;
+    else if (!arg.startsWith('-') && !args.taskId) args.taskId = arg;
+    else throw new Error(`unknown retry argument: ${arg}`);
+  }
+  return args;
+}
+
+function parseStopArgs(argv) {
+  const args = { runsDir: undefined, runId: undefined, reason: 'stopped from CLI', json: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const next = () => argv[++i];
+    if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--runs-dir') args.runsDir = next();
     else if (arg === '--reason') args.reason = next();
     else if (!arg.startsWith('-') && !args.runId) args.runId = arg;
@@ -97,17 +144,19 @@ function parseStopArgs(argv) {
 }
 
 function parseAutoArgs(argv) {
-  const args = { host: '127.0.0.1', port: 8787, runsDir: undefined, codexBin: undefined, runner: undefined, runId: undefined, pollMs: 3000, help: false };
+  const args = { host: '127.0.0.1', port: 8787, runsDir: undefined, codexBin: undefined, runner: undefined, runId: undefined, json: false, pollMs: 3000, maxRetries: 1, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--host') args.host = next();
     else if (arg === '--port' || arg === '-p') args.port = Number(next());
     else if (arg === '--runs-dir') args.runsDir = next();
     else if (arg === '--codex-bin') args.codexBin = next();
     else if (arg === '--runner') args.runner = validateRunner(next(), '--runner');
     else if (arg === '--poll-ms') args.pollMs = Number(next());
+    else if (arg === '--max-retries') args.maxRetries = Number(next());
     else if (!arg.startsWith('-') && !args.runId) args.runId = arg;
     else throw new Error(`unknown auto argument: ${arg}`);
   }
@@ -118,12 +167,13 @@ function parseSubmitArgs(argv) {
   const args = {
     host: '127.0.0.1', port: 8787, repo: undefined, runsDir: undefined, codexBin: undefined,
     runner: undefined, label: undefined, taskText: undefined, taskFile: undefined, maxParallel: 3,
-    workerSandbox: 'workspace-write', auto: true, detach: false, watch: true, pollMs: 3000, help: false
+    workerSandbox: 'workspace-write', auto: true, detach: false, watch: true, json: false, pollMs: 3000, maxRetries: 1, help: false
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--host') args.host = next();
     else if (arg === '--port' || arg === '-p') args.port = Number(next());
     else if (arg === '--repo' || arg === '-r') args.repo = next();
@@ -140,6 +190,7 @@ function parseSubmitArgs(argv) {
     else if (arg === '--detach' || arg === '-d') args.detach = true;
     else if (arg === '--watch') args.watch = true;
     else if (arg === '--poll-ms') args.pollMs = Number(next());
+    else if (arg === '--max-retries') args.maxRetries = Number(next());
     else throw new Error(`unknown submit argument: ${arg}`);
   }
   return args;
@@ -155,15 +206,26 @@ function applyRuntimeEnv(args) {
   if (args.runner) process.env.KANBAN_RUNNER = args.runner;
 }
 
+function printJson(value) {
+  console.log(JSON.stringify(value, null, 2));
+}
+
+function printVersion() {
+  console.log(`input-kanban v${PACKAGE_VERSION}`);
+}
+
 function printHelp() {
-  console.log(`input-kanban
+  console.log(`input-kanban v${PACKAGE_VERSION}
 
 Usage:
   input-kanban [options]
   input-kanban serve [options]
   input-kanban submit [options]
+  input-kanban --version
+  input-kanban runs [options]
   input-kanban status [runId] [options]
   input-kanban result [runId] [options]
+  input-kanban retry <runId> [taskId] [options]
   input-kanban stop <runId> [options]
 
 Serve options:
@@ -173,21 +235,39 @@ Serve options:
   --runs-dir <path>          Runtime runs directory, default ~/.input-kanban/runs
   --codex-bin <path>         Codex CLI executable, default codex
   --runner <mode>            Runner mode: headless or tmux, default headless
+  -j, --json                 Emit JSON startup output
+  -v, --version              Print version and exit
   --open                     Open browser after starting
   --no-open                  Do not open browser, default
+
+Runs options:
+  --runs-dir <path>          Runtime runs directory shared with the Web UI
+  --active                   Show only active or pending-action runs
+  --include-archived         Include archived runs
+  --limit <n>                Maximum rows to print, default 20
+  -j, --json                 Emit JSON output instead of human text
 
 Status options:
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --watch                    Keep printing status until the run reaches a terminal state
   --poll-ms <ms>             Watch poll interval, default 3000
+  -j, --json                 Emit JSON output instead of human text
 
 Result options:
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --copy                     Copy final result to clipboard
+  -j, --json                 Emit JSON output instead of human text
+
+Retry options:
+  --runs-dir <path>          Runtime runs directory shared with the Web UI
+  --reason <text>            Retry reason stored in task retry history
+  --max-retries <n>          Retry limit for automatic retry policy, default 1
+  -j, --json                 Emit JSON output instead of human text
 
 Stop options:
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --reason <text>            Stop reason stored in run state
+  -j, --json                 Emit JSON output instead of human text
 
 Submit options:
   -r, --repo <path>          Target Git work tree, default current directory
@@ -203,6 +283,7 @@ Submit options:
   -d, --detach               Run the default auto loop in a background supervisor
   --watch                    Watch status after starting the planner
   --poll-ms <ms>             Watch poll interval, default 3000
+  -j, --json                 Emit JSON output instead of human text
   -h, --help                 Show help
 `);
 }
@@ -232,6 +313,23 @@ Options:
 `);
 }
 
+function printRunsHelp() {
+  console.log(`input-kanban runs
+
+Usage:
+  input-kanban runs
+  input-kanban runs --active
+  input-kanban --json runs --active
+
+Options:
+  --runs-dir <path>          Runtime runs directory shared with the Web UI
+  --active                   Show only active or pending-action runs
+  --include-archived         Include archived runs
+  --limit <n>                Maximum rows to print, default 20
+  -j, --json                 Emit JSON output instead of human text
+`);
+}
+
 function printStatusHelp() {
   console.log(`input-kanban status
 
@@ -245,6 +343,7 @@ Options:
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --watch                    Keep printing status until the run reaches a terminal state
   --poll-ms <ms>             Watch poll interval, default 3000
+  -j, --json                 Emit JSON output instead of human text
 `);
 }
 
@@ -259,6 +358,23 @@ Usage:
 Options:
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --copy                     Copy final result to clipboard
+  -j, --json                 Emit JSON output instead of human text
+`);
+}
+
+function printRetryHelp() {
+  console.log(`input-kanban retry
+
+Usage:
+  input-kanban retry <runId>
+  input-kanban retry <runId> <taskId>
+  input-kanban --json retry <runId> <taskId>
+
+Options:
+  --runs-dir <path>          Runtime runs directory shared with the Web UI
+  --reason <text>            Retry reason stored in task retry history
+  --max-retries <n>          Retry limit for automatic retry policy, default 1
+  -j, --json                 Emit JSON output instead of human text
 `);
 }
 
@@ -271,6 +387,7 @@ Usage:
 Options:
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --reason <text>            Stop reason stored in run state
+  -j, --json                 Emit JSON output instead of human text
 `);
 }
 
@@ -285,6 +402,7 @@ Options:
   --codex-bin <path>         Codex CLI executable, default codex
   --runner <mode>            Runner mode: headless or tmux
   --poll-ms <ms>             Watch poll interval, default 3000
+  -j, --json                 Emit JSON output instead of human text
 `);
 }
 
@@ -308,8 +426,12 @@ async function readTaskText(args) {
   throw new Error('submit requires --task or --task-file');
 }
 
+function baseUrl(args) {
+  return `http://${args.host || '127.0.0.1'}:${Number(args.port || 8787)}`;
+}
+
 function webUrl(args, runId = '') {
-  return `http://${args.host || '127.0.0.1'}:${Number(args.port || 8787)}${runId ? `  (runId: ${runId})` : ''}`;
+  return `${baseUrl(args)}${runId ? `  (runId: ${runId})` : ''}`;
 }
 
 function displayStatus(status) {
@@ -351,12 +473,25 @@ function printRunStatus(state) {
   if (state.judge?.status && state.judge.status !== 'pending') console.log(`验收: ${displayStatus(state.judge.status)}`);
 }
 
+function printRunsTable(runs) {
+  if (!runs.length) { console.log('没有找到任务批次'); return; }
+  for (const run of runs) {
+    console.log(`${run.runId}｜${run.label || '-'}｜${displayStatus(run.status)}｜进度 ${run.completed}/${run.total}｜执行中 ${run.running}｜失败 ${run.failed}｜runner ${run.runner || '-'}｜沙箱 ${run.workerSandbox || '-'}｜仓库 ${run.repo || '-'}`);
+  }
+}
+
 function isTerminal(state) {
   return ['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(state.status);
 }
 
 function isFailureTerminal(state) {
   return ['judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(state.status);
+}
+
+function isActiveRunSummary(run) {
+  if (!run) return false;
+  if (Number(run.running) > 0) return true;
+  return !['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(run.status);
 }
 
 function hasRecoverableUnknownTask(state) {
@@ -374,8 +509,8 @@ async function confirmFailureTerminal(runId, state, refreshRun, pollMs) {
   return { confirmed: true, state: confirmed };
 }
 
-async function watchRun(runId, { auto = false, pollMs = 3000 } = {}) {
-  const { dispatchRun, refreshRun, startJudge } = await import('../src/orchestrator.js');
+async function watchRun(runId, { auto = false, pollMs = 3000, quiet = false, maxRetries = 1 } = {}) {
+  const { dispatchRun, refreshRun, retryRun, startJudge } = await import('../src/orchestrator.js');
   let lastStatus = '';
   let judgeStarted = false;
   while (true) {
@@ -383,15 +518,26 @@ async function watchRun(runId, { auto = false, pollMs = 3000 } = {}) {
     if (!state) throw new Error(`run not found: ${runId}`);
     const line = statusLine(state);
     if (line !== lastStatus) {
-      console.log(`[${new Date().toLocaleTimeString()}] ${line}`);
+      if (!quiet) console.log(`[${new Date().toLocaleTimeString()}] ${line}`);
       lastStatus = line;
     }
 
+    if (auto && state.status === 'batch_blocked') {
+      try {
+        const retryState = await retryRun(runId, { reason: 'auto retry from CLI', maxRetries, auto: true });
+        if (!quiet) console.log(`自动重试任务: ${retryState.retriedTaskIds?.join(', ') || '-'}`);
+        lastStatus = '';
+        continue;
+      } catch (error) {
+        if (!quiet) console.log(`自动重试跳过: ${error.message || String(error)}`);
+      }
+    }
+
     if (auto && state.status === 'planned') {
-      console.log('自动派发任务...');
+      if (!quiet) console.log('自动派发任务...');
       await dispatchRun(runId);
     } else if (auto && state.status === 'batches_completed' && state.judge?.status !== 'running' && !judgeStarted) {
-      console.log('自动发起最终验收...');
+      if (!quiet) console.log('自动发起最终验收...');
       judgeStarted = true;
       await startJudge(runId);
     }
@@ -415,11 +561,15 @@ async function serve(args) {
   applyRuntimeEnv(args);
   const { startServer } = await import('../src/server.js');
   const instance = await startServer({ host: process.env.HOST, port: Number(process.env.PORT || 8787), log: false });
-  console.log('Input Kanban started');
-  console.log(`URL:  ${instance.url}`);
-  console.log(`Repo: ${instance.defaultRepo}`);
-  console.log(`Runs: ${instance.runsDir}`);
-  console.log(`Runner: ${instance.runner}`);
+  if (args.json) {
+    printJson({ ok: true, command: 'serve', version: instance.version, url: instance.url, repo: instance.defaultRepo, runsDir: instance.runsDir, runner: instance.runner });
+  } else {
+    console.log(`Input Kanban v${PACKAGE_VERSION} started`);
+    console.log(`URL:  ${instance.url}`);
+    console.log(`Repo: ${instance.defaultRepo}`);
+    console.log(`Runs: ${instance.runsDir}`);
+    console.log(`Runner: ${instance.runner}`);
+  }
   if (args.open) openBrowser(instance.url);
   const shutdown = () => { instance.stop().finally(() => process.exit(0)); };
   process.on('SIGINT', shutdown);
@@ -428,7 +578,7 @@ async function serve(args) {
 
 function detachedAutoArgs(runId, args) {
   const cliPath = fileURLToPath(import.meta.url);
-  const values = [cliPath, 'auto', runId, '--host', args.host || '127.0.0.1', '--port', String(args.port || 8787), '--poll-ms', String(args.pollMs || 3000)];
+  const values = [cliPath, 'auto', runId, '--host', args.host || '127.0.0.1', '--port', String(args.port || 8787), '--poll-ms', String(args.pollMs || 3000), '--max-retries', String(args.maxRetries ?? 1)];
   if (args.runsDir) values.push('--runs-dir', path.resolve(args.runsDir));
   if (args.codexBin) values.push('--codex-bin', args.codexBin);
   if (args.runner) values.push('--runner', args.runner);
@@ -452,16 +602,32 @@ async function latestRunId() {
   return runs[0].runId;
 }
 
+async function runs(args) {
+  applyRuntimeEnv(args);
+  const { listRuns } = await import('../src/orchestrator.js');
+  const limit = Number.isFinite(Number(args.limit)) && Number(args.limit) > 0 ? Number(args.limit) : 20;
+  const allRuns = await listRuns({ includeArchived: !!args.includeArchived });
+  const filtered = (args.active ? allRuns.filter(isActiveRunSummary) : allRuns).slice(0, limit);
+  if (args.json) {
+    printJson({ ok: true, command: 'runs', active: !!args.active, includeArchived: !!args.includeArchived, limit, count: filtered.length, runs: filtered });
+    return;
+  }
+  printRunsTable(filtered);
+}
+
 async function status(args) {
   applyRuntimeEnv(args);
   const runId = args.runId || await latestRunId();
+  const { refreshRun, summaryOfRun } = await import('../src/orchestrator.js');
   if (args.watch) {
-    await watchRun(runId, { auto: false, pollMs: args.pollMs });
+    const finalState = await watchRun(runId, { auto: false, pollMs: args.pollMs, quiet: args.json });
+    if (isFailureTerminal(finalState)) process.exitCode = 1;
+    if (args.json) printJson({ ok: true, command: 'status', run: summaryOfRun(finalState) });
     return;
   }
-  const { refreshRun } = await import('../src/orchestrator.js');
   const state = await refreshRun(runId);
   if (!state) throw new Error(`run not found: ${runId}`);
+  if (args.json) { printJson({ ok: true, command: 'status', run: summaryOfRun(state) }); return; }
   printRunStatus(state);
 }
 
@@ -469,9 +635,17 @@ async function readFinalResult(runId) {
   const { loadRun, readRunFile } = await import('../src/orchestrator.js');
   const state = await loadRun(runId);
   if (!state) throw new Error(`run not found: ${runId}`);
-  try { return await readRunFile(runId, 'judge', 'verdict.json'); }
+  try {
+    const text = await readRunFile(runId, 'judge', 'verdict.json');
+    let parsed = null;
+    try { parsed = JSON.parse(text); } catch {}
+    return { state, source: 'judge/verdict.json', text, parsed };
+  }
   catch {}
-  try { return await readRunFile(runId, 'judge', 'last_message.md'); }
+  try {
+    const text = await readRunFile(runId, 'judge', 'last_message.md');
+    return { state, source: 'judge/last_message.md', text, parsed: null };
+  }
   catch {}
   throw new Error(`最终结果尚未生成：当前状态 ${displayStatus(state.status)}`);
 }
@@ -503,39 +677,56 @@ async function copyToClipboard(text) {
 async function result(args) {
   applyRuntimeEnv(args);
   const runId = args.runId || await latestRunId();
-  const text = await readFinalResult(runId);
+  const { state, source, text, parsed } = await readFinalResult(runId);
+  const { summaryOfRun } = await import('../src/orchestrator.js');
   if (args.copy) {
     await copyToClipboard(text);
+    if (args.json) { printJson({ ok: true, command: 'result', run: summaryOfRun(state), source, copied: true }); return; }
     console.log(`已复制最终结果: ${runId}`);
+    return;
+  }
+  if (args.json) {
+    printJson({ ok: true, command: 'result', run: summaryOfRun(state), source, result: parsed, text: parsed ? null : text });
     return;
   }
   console.log(text);
 }
 
+async function retry(args) {
+  applyRuntimeEnv(args);
+  if (!args.runId) throw new Error('retry requires a runId');
+  const { retryRun, summaryOfRun } = await import('../src/orchestrator.js');
+  const state = await retryRun(args.runId, { taskId: args.taskId, reason: args.reason, maxRetries: args.maxRetries });
+  if (args.json) { printJson({ ok: true, command: 'retry', run: summaryOfRun(state), retriedTaskIds: state.retriedTaskIds || [] }); return; }
+  console.log(`已重试任务: ${(state.retriedTaskIds || []).join(', ') || '-'}`);
+}
+
 async function stop(args) {
   applyRuntimeEnv(args);
   if (!args.runId) throw new Error('stop requires a runId');
-  const { stopRun } = await import('../src/orchestrator.js');
+  const { stopRun, summaryOfRun } = await import('../src/orchestrator.js');
   const state = await stopRun(args.runId, { reason: args.reason });
+  if (args.json) { printJson({ ok: true, command: 'stop', run: summaryOfRun(state), reason: args.reason }); return; }
   console.log(`已停止任务批次: ${state.runId}`);
 }
 
 async function autoRun(args) {
   applyRuntimeEnv(args);
   if (!args.runId) throw new Error('auto requires a runId');
-  const { loadRun, startPlanner } = await import('../src/orchestrator.js');
+  const { loadRun, startPlanner, summaryOfRun } = await import('../src/orchestrator.js');
   const state = await loadRun(args.runId);
   if (!state) throw new Error(`run not found: ${args.runId}`);
   if (state.status === 'created') await startPlanner(args.runId);
-  const finalState = await watchRun(args.runId, { auto: true, pollMs: args.pollMs });
+  const finalState = await watchRun(args.runId, { auto: true, pollMs: args.pollMs, quiet: args.json, maxRetries: args.maxRetries });
   if (isFailureTerminal(finalState)) process.exitCode = 1;
+  if (args.json) { printJson({ ok: true, command: 'auto', run: summaryOfRun(finalState) }); return; }
 }
 
 async function submit(args) {
   if (args.detach && !args.auto) throw new Error('--detach requires auto mode; remove --no-auto');
   applyRuntimeEnv(args);
   const taskText = await readTaskText(args);
-  const { createRun, startPlanner } = await import('../src/orchestrator.js');
+  const { createRun, startPlanner, summaryOfRun } = await import('../src/orchestrator.js');
   const state = await createRun({
     label: args.label,
     taskText,
@@ -543,46 +734,71 @@ async function submit(args) {
     maxParallel: args.maxParallel,
     workerSandbox: args.workerSandbox
   });
-  console.log(`已创建任务批次: ${state.runId}`);
-  console.log(`看板地址: ${webUrl(args, state.runId)}`);
-  console.log(`终端查看: input-kanban status ${state.runId} --watch`);
+  if (!args.json) {
+    console.log(`已创建任务批次: ${state.runId}`);
+    console.log(`看板地址: ${webUrl(args, state.runId)}`);
+    console.log(`终端查看: input-kanban status ${state.runId} --watch`);
+  }
   if (args.detach) {
     const pid = startDetachedAuto(state.runId, args);
+    if (args.json) { printJson({ ok: true, command: 'submit', phase: 'detached', url: baseUrl(args), supervisorPid: pid, run: summaryOfRun(state) }); return; }
     console.log(`后台执行中: supervisor pid ${pid}`);
     return;
   }
-  console.log('发起任务拆分...');
-  await startPlanner(state.runId);
-  if (!args.watch && !args.auto) return;
-  const finalState = await watchRun(state.runId, { auto: args.auto, pollMs: args.pollMs });
-  console.log(`最终状态: ${finalState.status}`);
+  if (!args.json) console.log('发起任务拆分...');
+  const plannedState = await startPlanner(state.runId);
+  if (!args.watch && !args.auto) {
+    if (args.json) { printJson({ ok: true, command: 'submit', phase: 'planned', url: baseUrl(args), auto: args.auto, watch: args.watch, run: summaryOfRun(plannedState || state) }); }
+    return;
+  }
+  const finalState = await watchRun(state.runId, { auto: args.auto, pollMs: args.pollMs, quiet: args.json, maxRetries: args.maxRetries });
   if (isFailureTerminal(finalState)) process.exitCode = 1;
+  if (args.json) { printJson({ ok: true, command: 'submit', phase: 'final', url: baseUrl(args), auto: args.auto, watch: args.watch, run: summaryOfRun(finalState) }); return; }
+  console.log(`最终状态: ${finalState.status}`);
 }
 
 try {
-  const { command, rest } = splitCommand(process.argv.slice(2));
+  const { command, rest, globals = {} } = splitCommand(process.argv.slice(2));
   if (command === 'serve') {
     const args = parseServeArgs(rest);
+    args.json = args.json || globals.json;
     if (args.help) { printHelp(); process.exit(0); }
     await serve(args);
+  } else if (command === 'version') {
+    printVersion();
   } else if (command === 'submit') {
     const args = parseSubmitArgs(rest);
+    args.json = args.json || globals.json;
     if (args.help) { printSubmitHelp(); process.exit(0); }
     await submit(args);
+  } else if (command === 'runs') {
+    const args = parseRunsArgs(rest);
+    args.json = args.json || globals.json;
+    if (args.help) { printRunsHelp(); process.exit(0); }
+    await runs(args);
   } else if (command === 'status') {
     const args = parseStatusArgs(rest);
+    args.json = args.json || globals.json;
     if (args.help) { printStatusHelp(); process.exit(0); }
     await status(args);
   } else if (command === 'result') {
     const args = parseResultArgs(rest);
+    args.json = args.json || globals.json;
     if (args.help) { printResultHelp(); process.exit(0); }
     await result(args);
+  } else if (command === 'retry') {
+    const args = parseRetryArgs(rest);
+    args.json = args.json || globals.json;
+    if (args.help) { printRetryHelp(); process.exit(0); }
+    await retry(args);
   } else if (command === 'stop') {
     const args = parseStopArgs(rest);
+    args.json = args.json || globals.json;
     if (args.help) { printStopHelp(); process.exit(0); }
     await stop(args);
   } else if (command === 'auto') {
     const args = parseAutoArgs(rest);
+    args.json = args.json || globals.json;
     if (args.help) { printAutoHelp(); process.exit(0); }
     await autoRun(args);
   }

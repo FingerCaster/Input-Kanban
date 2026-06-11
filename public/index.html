@@ -119,6 +119,7 @@
     .modal-backdrop.hidden { display: none; }
     .modal-card { width: min(760px, 100%); border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 18px 60px rgba(0,0,0,.38); padding: 16px; }
     .modal-card textarea { min-height: 220px; }
+    .page-footer { padding: 0 18px 18px; color: var(--muted); text-align: center; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -186,6 +187,7 @@
     </section>
   </div>
 </main>
+<footer id="pageFooter" class="page-footer">版本：-</footer>
 <div id="manualCompleteModal" class="modal-backdrop hidden">
   <div class="modal-card">
     <h2>手动标记成功</h2>
@@ -205,12 +207,17 @@ let selectedTask = null;
 let selectedFileName = null;
 let manualCompleteTaskId = null;
 let pendingArchiveRunId = null;
+const autoDispatchingRuns = new Set();
+const autoJudgingRuns = new Set();
+const autoRetryingRuns = new Set();
+const autoRetrySkippedRuns = new Set();
 let currentState = null;
 let lastAutoRefreshAt = null;
 let runListVisibleCount = 10;
 let latestRuns = [];
 const statusByRunId = new Map();
 const AUTO_REFRESH_MS = 3000;
+const AUTO_MAX_RETRIES = 1;
 const RUN_LIST_PAGE_SIZE = 10;
 
 async function api(path, opts={}) {
@@ -330,6 +337,7 @@ async function loadHealth() {
   const h = await api('/api/health');
   document.getElementById('repo').value = h.defaultRepo;
   document.getElementById('runsDir').value = h.runsDir;
+  document.getElementById('pageFooter').textContent = h.version ? `版本：v${h.version}` : '版本：未知（请重启服务）';
 }
 function showCreateForm() {
   selectedRun = null; selectedTask = null; selectedFileName = null; currentState = null;
@@ -357,6 +365,7 @@ async function refreshRuns() {
   const data = await api('/api/runs');
   latestRuns = data.runs || [];
   renderRunList();
+  await maybeAutoAdvanceRunSummaries(latestRuns);
 }
 function renderRunList() {
   const visibleRuns = latestRuns.slice(0, runListVisibleCount);
@@ -382,7 +391,7 @@ function showMoreRuns() {
   renderRunList();
 }
 async function selectRun(id) { selectedRun = id; selectedTask = null; selectedFileName = null; clearFileView(); hideCreateForm(); await refreshSelected(); }
-async function refreshSelected({auto=false} = {}) {
+async function refreshSelected({auto=false, skipAutoAdvance=false} = {}) {
   if (!selectedRun) return;
   currentState = await api(`/api/runs/${selectedRun}/status`);
   statusByRunId.set(selectedRun, currentState);
@@ -394,6 +403,7 @@ async function refreshSelected({auto=false} = {}) {
   await loadTaskDescription();
   renderTasks(); await refreshRuns();
   if (selectedTask && selectedFileName) await loadFile(selectedFileName, { preserveScroll: true });
+  if (!skipAutoAdvance) await maybeAutoAdvanceSelectedRun();
 }
 function renderSelectedHeader() {
   if (!currentState) return '<div class="muted">未选择任务批次</div>';
@@ -463,9 +473,9 @@ function updateAutoRefreshHint() {
   const el = document.getElementById('autoRefreshHint');
   if (!el) return;
   if (!selectedRun || !currentState) { el.textContent = '自动刷新：未启动'; return; }
-  const active = ['planning','running','judging'].includes(currentState.status) || (currentState.tasks || []).some(t => t.status === 'running') || currentState.planner?.status === 'running' || currentState.judge?.status === 'running';
+  const active = ['planning','running','judging','planned','batches_completed','batch_blocked'].includes(currentState.status) || (currentState.tasks || []).some(t => t.status === 'running') || currentState.planner?.status === 'running' || currentState.judge?.status === 'running';
   const last = lastAutoRefreshAt ? lastAutoRefreshAt.toLocaleTimeString() : '尚未触发';
-  el.textContent = active ? `自动刷新中：每 ${AUTO_REFRESH_MS / 1000} 秒刷新一次｜上次刷新 ${last}` : `自动刷新待命：每 ${AUTO_REFRESH_MS / 1000} 秒检查一次｜上次刷新 ${last}`;
+  el.textContent = active ? `自动模式中：每 ${AUTO_REFRESH_MS / 1000} 秒刷新并推进一次｜上次刷新 ${last}` : `自动模式待命：每 ${AUTO_REFRESH_MS / 1000} 秒检查一次｜上次刷新 ${last}`;
 }
 function taskStatusCell(t) {
   if (t?.manualCompletion) {
@@ -801,6 +811,67 @@ async function renameRunLabel(event, runId = selectedRun) {
     if (selectedRun === runId) await refreshSelected();
     else await refreshRuns();
   });
+}
+async function maybeAutoAdvanceRunSummaries(runs) {
+  for (const run of runs || []) {
+    if (!run || run.runId === selectedRun) continue;
+    if (run.status !== 'batch_blocked') autoRetrySkippedRuns.delete(run.runId);
+    if (run.status === 'planned') await autoDispatchRun(run.runId, false);
+    else if (run.status === 'batches_completed') await autoJudgeRun(run.runId, false);
+    else if (run.status === 'batch_blocked') await autoRetryRun(run.runId, false);
+  }
+}
+async function autoDispatchRun(runId, refreshSelectedAfter = true) {
+  if (!runId || autoDispatchingRuns.has(runId)) return false;
+  autoDispatchingRuns.add(runId);
+  try {
+    await api(`/api/runs/${runId}/dispatch`, {method:'POST'});
+    if (refreshSelectedAfter && selectedRun === runId) await refreshSelected({auto:true, skipAutoAdvance:true});
+    return true;
+  } catch (error) {
+    console.error('自动派发失败', error);
+    return false;
+  } finally {
+    autoDispatchingRuns.delete(runId);
+  }
+}
+async function autoJudgeRun(runId, refreshSelectedAfter = true) {
+  if (!runId || autoJudgingRuns.has(runId)) return false;
+  autoJudgingRuns.add(runId);
+  try {
+    await api(`/api/runs/${runId}/judge`, {method:'POST'});
+    if (refreshSelectedAfter && selectedRun === runId) await refreshSelected({auto:true, skipAutoAdvance:true});
+    return true;
+  } catch (error) {
+    console.error('自动验收失败', error);
+    return false;
+  } finally {
+    autoJudgingRuns.delete(runId);
+  }
+}
+async function autoRetryRun(runId, refreshSelectedAfter = true) {
+  if (!runId || autoRetryingRuns.has(runId) || autoRetrySkippedRuns.has(runId)) return false;
+  autoRetryingRuns.add(runId);
+  try {
+    await api(`/api/runs/${runId}/retry`, {method:'POST', body: JSON.stringify({ reason: 'auto retry from dashboard', maxRetries: AUTO_MAX_RETRIES, auto: true })});
+    if (refreshSelectedAfter && selectedRun === runId) await refreshSelected({auto:true, skipAutoAdvance:true});
+    return true;
+  } catch (error) {
+    autoRetrySkippedRuns.add(runId);
+    console.error('自动重试失败', error);
+    return false;
+  } finally {
+    autoRetryingRuns.delete(runId);
+  }
+}
+async function maybeAutoAdvanceSelectedRun() {
+  const runId = selectedRun;
+  const state = currentState;
+  if (!runId || !state) return;
+  if (state.status !== 'batch_blocked') autoRetrySkippedRuns.delete(runId);
+  if (state.status === 'planned') await autoDispatchRun(runId);
+  else if (state.status === 'batches_completed' && state.judge?.status !== 'running' && state.judge?.status !== 'completed') await autoJudgeRun(runId);
+  else if (state.status === 'batch_blocked') await autoRetryRun(runId);
 }
 async function planRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/plan`, {method:'POST'}); await refreshSelected(); }); }
 async function dispatchRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/dispatch`, {method:'POST'}); await refreshSelected(); }); }

@@ -17,6 +17,10 @@ const runner = defaultRunner;
 const VALID_SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 const MISSING_RUNNER_GRACE_MS = 10000;
 const MAX_DERIVED_LABEL_DISPLAY_WIDTH = 40;
+const RUN_STATE_LOCK_NAME = 'run_state.lock';
+const RUN_STATE_LOCK_STALE_MS = 30000;
+const RUN_STATE_LOCK_TIMEOUT_MS = 30000;
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 function normalizeSandbox(value, fallback = 'workspace-write') {
   const sandbox = String(value || '').trim();
@@ -26,6 +30,65 @@ function normalizeSandbox(value, fallback = 'workspace-write') {
 
 function statePath(runDir) { return path.join(runDir, 'run_state.json'); }
 function planPath(runDir) { return path.join(runDir, 'plan.json'); }
+function lockPath(runDir) { return path.join(runDir, RUN_STATE_LOCK_NAME); }
+
+async function isStaleRunLock(lockFile) {
+  const info = await fileInfo(lockFile);
+  if (!info.exists) return false;
+  const modifiedAt = Date.parse(info.mtime || '');
+  if (!Number.isFinite(modifiedAt)) return true;
+  if (Date.now() - modifiedAt < RUN_STATE_LOCK_STALE_MS) return false;
+  const lockData = await readJson(lockFile, null);
+  const pid = Number(lockData?.pid);
+  if (!Number.isFinite(pid) || pid <= 0) return true;
+  return !isPidAlive(pid);
+}
+
+export async function acquireRunStateLock(runId, { timeoutMs = RUN_STATE_LOCK_TIMEOUT_MS, staleMs = RUN_STATE_LOCK_STALE_MS } = {}) {
+  const runDir = pathForRun(runId);
+  await ensureDir(runDir);
+  const lockFile = lockPath(runDir);
+  const startedAt = Date.now();
+  let waitMs = 50;
+  while (true) {
+    try {
+      const handle = await fsp.open(lockFile, 'wx');
+      try {
+        await handle.writeFile(JSON.stringify({ runId, pid: process.pid, createdAt: nowIso() }, null, 2));
+        await handle.sync().catch(() => {});
+      } catch (error) {
+        await handle.close().catch(() => {});
+        await fsp.unlink(lockFile).catch(() => {});
+        throw error;
+      }
+      let released = false;
+      return async () => {
+        if (released) return;
+        released = true;
+        try { await handle.close(); } catch {}
+        await fsp.unlink(lockFile).catch(() => {});
+      };
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      if (await isStaleRunLock(lockFile) && Date.now() - startedAt >= staleMs) {
+        await fsp.unlink(lockFile).catch(() => {});
+        continue;
+      }
+      if (Date.now() - startedAt >= timeoutMs) throw new Error(`run state lock busy: ${runId}`);
+      await sleep(waitMs);
+      waitMs = Math.min(waitMs * 1.5, 1000);
+    }
+  }
+}
+
+async function withRunStateLock(runId, fn, options = {}) {
+  const release = await acquireRunStateLock(runId, options);
+  try {
+    return await fn();
+  } finally {
+    await release();
+  }
+}
 
 function shouldMarkRunnerUnknown(target) {
   const missingSince = Date.parse(target.missingRunnerAt || '');
@@ -238,38 +301,42 @@ Plan: ${path.join(pathForRun(state.runId), 'plan.json')}
 }
 
 export async function startPlanner(runId) {
-  const state = await loadRun(runId);
-  if (!state) throw new Error(`run not found: ${runId}`);
-  if (state.archived) throw new Error('archived run cannot be planned');
-  if (state.status === 'stopped') throw new Error('stopped run cannot be planned; create a new run after modifications');
-  if (state.planner.status === 'running') throw new Error('planner already running');
-  if (hasStartedExecution(state)) throw new Error('planner retry is allowed only before any worker/judge starts');
-  const runDir = pathForRun(runId);
-  const previousPlanner = state.planner;
-  if (previousPlanner?.status && previousPlanner.status !== 'pending') await rotatePlannerAttempt(state, runDir);
-  state.batches = [];
-  state.tasks = [];
-  state.judge = { status: 'pending' };
-  const outDir = roleDir(runDir, 'planner');
-  await ensureDir(outDir);
-  await fsp.rm(planPath(runDir), { force: true });
-  const taskText = await fsp.readFile(path.join(runDir, 'task.md'), 'utf8');
-  const prompt = defaultPlannerPrompt(state, taskText);
-  const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: state.repo, outDir });
-  state.status = 'planning';
-  state.planner = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir, attempt: (state.plannerAttempts?.length || 0) + 1 };
-  await saveRun(state);
-  child.onExit(async code => {
-    const s = await loadRun(runId); if (!s || s.status === 'stopped') return;
-    s.planner.exitCode = code; s.planner.endedAt = nowIso(); s.planner.status = code === 0 ? 'completed' : 'failed';
-    const planResult = await materializePlan(s);
-    if (s.planner.status !== 'completed') s.status = 'plan_failed';
-    else if (planResult.ok) s.status = 'planned';
-    else if (planResult.empty) s.status = 'plan_empty';
-    else s.status = 'plan_failed';
-    await saveRun(s);
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    if (state.archived) throw new Error('archived run cannot be planned');
+    if (state.status === 'stopped') throw new Error('stopped run cannot be planned; create a new run after modifications');
+    if (state.planner.status === 'running') throw new Error('planner already running');
+    if (hasStartedExecution(state)) throw new Error('planner retry is allowed only before any worker/judge starts');
+    const runDir = pathForRun(runId);
+    const previousPlanner = state.planner;
+    if (previousPlanner?.status && previousPlanner.status !== 'pending') await rotatePlannerAttempt(state, runDir);
+    state.batches = [];
+    state.tasks = [];
+    state.judge = { status: 'pending' };
+    const outDir = roleDir(runDir, 'planner');
+    await ensureDir(outDir);
+    await fsp.rm(planPath(runDir), { force: true });
+    const taskText = await fsp.readFile(path.join(runDir, 'task.md'), 'utf8');
+    const prompt = defaultPlannerPrompt(state, taskText);
+    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: state.repo, outDir });
+    state.status = 'planning';
+    state.planner = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir, attempt: (state.plannerAttempts?.length || 0) + 1 };
+    await saveRun(state);
+    child.onExit(async code => {
+      await withRunStateLock(runId, async () => {
+        const s = await loadRun(runId); if (!s || s.status === 'stopped') return;
+        s.planner.exitCode = code; s.planner.endedAt = nowIso(); s.planner.status = code === 0 ? 'completed' : 'failed';
+        const planResult = await materializePlan(s);
+        if (s.planner.status !== 'completed') s.status = 'plan_failed';
+        else if (planResult.ok) s.status = 'planned';
+        else if (planResult.empty) s.status = 'plan_empty';
+        else s.status = 'plan_failed';
+        await saveRun(s);
+      });
+    });
+    return state;
   });
-  return state;
 }
 
 function normalizeExpectedArtifacts(value, runId, taskId) {
@@ -320,6 +387,43 @@ async function rotatePlannerAttempt(state, runDir) {
     planParseError: state.planner?.planParseError,
     planEmpty: !!state.planner?.planEmpty
   }];
+}
+
+async function rotateWorkerAttempt(state, task) {
+  const runDir = pathForRun(state.runId);
+  const workerDir = roleDir(runDir, 'worker', task.id);
+  if (!fs.existsSync(workerDir)) return null;
+  const attemptsDir = path.join(runDir, 'worker_attempts', task.id);
+  await ensureDir(attemptsDir);
+  const attempt = Number(task.retryCount || 0) + 1;
+  const archivedDir = path.join(attemptsDir, `attempt-${String(attempt).padStart(2, '0')}`);
+  await fsp.rm(archivedDir, { recursive: true, force: true });
+  await fsp.rename(workerDir, archivedDir);
+  task.retryHistory = [...(task.retryHistory || []), {
+    attempt,
+    status: task.status,
+    exitCode: task.exitCode ?? null,
+    startedAt: task.startedAt,
+    endedAt: task.endedAt,
+    archivedDir,
+    archivedAt: nowIso(),
+    reason: task.retryReason || null
+  }];
+  task.retryCount = attempt;
+  task.retryReason = null;
+  delete task.pid;
+  delete task.exitCode;
+  delete task.startedAt;
+  delete task.endedAt;
+  delete task.stoppedAt;
+  delete task.missingRunnerAt;
+  delete task.manualCompletion;
+  delete task.originalStatus;
+  delete task.originalExitCode;
+  delete task.error;
+  delete task.tmux;
+  task.status = 'pending';
+  return archivedDir;
 }
 
 function normalizePlan(plan, defaultMaxParallel, defaultSandbox = 'workspace-write', runId = '') {
@@ -378,18 +482,20 @@ async function materializePlan(state) {
 }
 
 export async function dispatchRun(runId) {
-  const state = await loadRun(runId);
-  if (!state) throw new Error(`run not found: ${runId}`);
-  if (state.archived) throw new Error('archived run cannot be dispatched');
-  if (state.status === 'stopped') throw new Error('stopped run cannot be dispatched; create a new run after modifications');
-  if (!state.tasks?.length) throw new Error('no tasks in plan');
-  if (state.status === 'batch_blocked') throw new Error('current batch is blocked by failed/unknown tasks');
-  if (allBatchesCompleted(state)) throw new Error('all batches completed; run final judge next');
-  state.status = 'running';
-  await scheduleMoreWorkers(state);
-  recomputeRunStatus(state);
-  await saveRun(state);
-  return state;
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    if (state.archived) throw new Error('archived run cannot be dispatched');
+    if (state.status === 'stopped') throw new Error('stopped run cannot be dispatched; create a new run after modifications');
+    if (!state.tasks?.length) throw new Error('no tasks in plan');
+    if (state.status === 'batch_blocked') throw new Error('current batch is blocked by failed/unknown tasks');
+    if (allBatchesCompleted(state)) throw new Error('all batches completed; run final judge next');
+    state.status = 'running';
+    await scheduleMoreWorkers(state);
+    recomputeRunStatus(state);
+    await saveRun(state);
+    return state;
+  });
 }
 
 function artifactPathForState(state, rel) {
@@ -428,139 +534,177 @@ ${task.prompt}${workerArtifactInstructions(state, task)}${upstreamArtifactInstru
 }
 
 export async function stopRun(runId, { reason = 'stopped by user' } = {}) {
-  const state = await loadRun(runId);
-  if (!state) throw new Error(`run not found: ${runId}`);
-  const stoppedAt = nowIso();
-  await runner.stopRun(runId);
-  const stoppedPids = new Set();
-  const stopTargetPid = target => {
-    const pid = Number(target?.pid);
-    if (Number.isFinite(pid) && pid > 0 && !stoppedPids.has(pid)) {
-      stoppedPids.add(pid);
-      stopPid(pid);
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    const stoppedAt = nowIso();
+    await runner.stopRun(runId);
+    const stoppedPids = new Set();
+    const stopTargetPid = target => {
+      const pid = Number(target?.pid);
+      if (Number.isFinite(pid) && pid > 0 && !stoppedPids.has(pid)) {
+        stoppedPids.add(pid);
+        stopPid(pid);
+      }
+    };
+    for (const roleState of [state.planner, state.judge]) {
+      if (roleState?.status === 'running') {
+        stopTargetPid(roleState);
+        Object.assign(roleState, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
+      }
     }
-  };
-  for (const roleState of [state.planner, state.judge]) {
-    if (roleState?.status === 'running') {
-      stopTargetPid(roleState);
-      Object.assign(roleState, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
+    for (const task of state.tasks || []) {
+      if (task.status === 'running') {
+        stopTargetPid(task);
+        Object.assign(task, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
+      }
     }
-  }
-  for (const task of state.tasks || []) {
-    if (task.status === 'running') {
-      stopTargetPid(task);
-      Object.assign(task, { status: 'stopped', stoppedAt, endedAt: stoppedAt });
+    for (const batch of state.batches || []) {
+      for (const task of batch.tasks || []) if (task.status === 'running') stopTargetPid(task);
     }
-  }
-  for (const batch of state.batches || []) {
-    for (const task of batch.tasks || []) if (task.status === 'running') stopTargetPid(task);
-  }
-  for (const batch of state.batches || []) {
-    if ((batch.tasks || []).some(t => t.status === 'stopped')) batch.status = 'stopped';
-  }
-  state.status = 'stopped';
-  state.stopInfo = { reason, stoppedAt };
-  await saveRun(state);
-  return state;
+    for (const batch of state.batches || []) {
+      if ((batch.tasks || []).some(t => t.status === 'stopped')) batch.status = 'stopped';
+    }
+    state.status = 'stopped';
+    state.stopInfo = { reason, stoppedAt };
+    await saveRun(state);
+    return state;
+  });
 }
 
 export async function archiveRun(runId, { reason = 'archived by user' } = {}) {
-  const state = await loadRun(runId);
-  if (!state) throw new Error(`run not found: ${runId}`);
-  if ((state.tasks || []).some(t => t.status === 'running') || state.planner?.status === 'running' || state.judge?.status === 'running') {
-    throw new Error('cannot archive a run while tasks are running; stop it first');
-  }
-  state.archived = true;
-  state.archivedAt = nowIso();
-  state.archiveInfo = { reason, archivedAt: state.archivedAt };
-  await saveRun(state);
-  return state;
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    if ((state.tasks || []).some(t => t.status === 'running') || state.planner?.status === 'running' || state.judge?.status === 'running') {
+      throw new Error('cannot archive a run while tasks are running; stop it first');
+    }
+    state.archived = true;
+    state.archivedAt = nowIso();
+    state.archiveInfo = { reason, archivedAt: state.archivedAt };
+    await saveRun(state);
+    return state;
+  });
 }
 
 export async function renameRun(runId, { label = '' } = {}) {
-  const state = await loadRun(runId);
-  if (!state) throw new Error(`run not found: ${runId}`);
-  const nextLabel = String(label || '').trim();
-  if (!nextLabel) throw userInputError('run label cannot be empty');
-  state.label = nextLabel;
-  state.renamedAt = nowIso();
-  await saveRun(state);
-  return state;
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    const nextLabel = String(label || '').trim();
+    if (!nextLabel) throw userInputError('run label cannot be empty');
+    state.label = nextLabel;
+    state.renamedAt = nowIso();
+    await saveRun(state);
+    return state;
+  });
+}
+
+export async function retryRun(runId, { taskId = '', reason = 'manual retry', maxRetries = 1, auto = false } = {}) {
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    if (state.archived) throw new Error('archived run cannot be retried');
+    if (state.status === 'stopped') throw new Error('stopped run cannot be retried');
+    const selectedTaskId = String(taskId || '').trim();
+    let taskIds = [];
+    if (selectedTaskId) {
+      const task = (state.tasks || []).find(item => item.id === selectedTaskId);
+      if (!task) throw new Error(`task not found: ${selectedTaskId}`);
+      taskIds = [task.id];
+      if (!['failed', 'unknown'].includes(task.status)) throw new Error(`task is not retryable: ${selectedTaskId}`);
+    } else {
+      const batch = currentBlockedBatch(state);
+      if (!batch) throw new Error('no blocked batch to retry');
+      taskIds = (batch.tasks || []).filter(item => ['failed', 'unknown'].includes(item.status) && (!auto || canAutoRetryTask(item, maxRetries))).map(item => item.id);
+      if (!taskIds.length) throw new Error('no retryable tasks in blocked batch');
+    }
+    const result = await retryTasksInState(state, taskIds, { auto, maxRetries, reason });
+    if (!result.retried.length) throw new Error('no tasks were retried');
+    await saveRun(state);
+    return { ...state, retriedTaskIds: result.retried };
+  });
 }
 
 export async function markTaskCompleted(runId, taskId, { reason = 'manual success confirmed by user', resultText = '' } = {}) {
-  const state = await loadRun(runId);
-  if (!state) throw new Error(`run not found: ${runId}`);
-  const task = (state.tasks || []).find(t => t.id === taskId);
-  if (!task) throw new Error(`task not found: ${taskId}`);
-  if (task.status === 'running') throw new Error('cannot mark a running task completed');
-  const runDir = pathForRun(runId);
-  const outDir = roleDir(runDir, 'worker', task.id);
-  await ensureDir(outDir);
-  if (task.status !== 'completed') {
-    const manualResult = String(resultText || '').trim();
-    if (manualResult) await fsp.writeFile(path.join(outDir, 'manual_result.md'), manualResult);
-    const override = {
-      type: 'manual_task_completed',
-      runId,
-      taskId,
-      originalStatus: task.originalStatus || task.status,
-      originalExitCode: task.originalExitCode ?? task.exitCode ?? null,
-      previousStatus: task.status,
-      previousExitCode: task.exitCode ?? null,
-      reason,
-      hasManualResult: !!manualResult,
-      manualResultFile: manualResult ? 'manual_result.md' : null,
-      manualResultPreview: manualResult ? manualResult.slice(0, 500) : '',
-      markedAt: nowIso()
-    };
-    await writeJsonAtomic(path.join(outDir, 'manual_completion.json'), override);
-    Object.assign(task, {
-      status: 'completed',
-      originalStatus: override.originalStatus,
-      originalExitCode: override.originalExitCode,
-      manualCompletion: override,
-      completedAt: override.markedAt
-    });
-    const batch = (state.batches || []).find(b => b.id === task.batchId);
-    if (batch) {
-      const batchTask = batch.tasks.find(t => t.id === task.id);
-      if (batchTask && batchTask !== task) Object.assign(batchTask, task);
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    const task = (state.tasks || []).find(t => t.id === taskId);
+    if (!task) throw new Error(`task not found: ${taskId}`);
+    if (task.status === 'running') throw new Error('cannot mark a running task completed');
+    const runDir = pathForRun(runId);
+    const outDir = roleDir(runDir, 'worker', task.id);
+    await ensureDir(outDir);
+    if (task.status !== 'completed') {
+      const manualResult = String(resultText || '').trim();
+      if (manualResult) await fsp.writeFile(path.join(outDir, 'manual_result.md'), manualResult);
+      const override = {
+        type: 'manual_task_completed',
+        runId,
+        taskId,
+        originalStatus: task.originalStatus || task.status,
+        originalExitCode: task.originalExitCode ?? task.exitCode ?? null,
+        previousStatus: task.status,
+        previousExitCode: task.exitCode ?? null,
+        reason,
+        hasManualResult: !!manualResult,
+        manualResultFile: manualResult ? 'manual_result.md' : null,
+        manualResultPreview: manualResult ? manualResult.slice(0, 500) : '',
+        markedAt: nowIso()
+      };
+      await writeJsonAtomic(path.join(outDir, 'manual_completion.json'), override);
+      Object.assign(task, {
+        status: 'completed',
+        originalStatus: override.originalStatus,
+        originalExitCode: override.originalExitCode,
+        manualCompletion: override,
+        completedAt: override.markedAt
+      });
+      const batch = (state.batches || []).find(b => b.id === task.batchId);
+      if (batch) {
+        const batchTask = batch.tasks.find(t => t.id === task.id);
+        if (batchTask && batchTask !== task) Object.assign(batchTask, task);
+      }
     }
-  }
-  recomputeRunStatus(state);
-  if (hasPendingRunnableBatch(state)) state.status = 'running';
-  await scheduleMoreWorkers(state);
-  recomputeRunStatus(state);
-  await saveRun(state);
-  return state;
+    recomputeRunStatus(state);
+    if (hasPendingRunnableBatch(state)) state.status = 'running';
+    await scheduleMoreWorkers(state);
+    recomputeRunStatus(state);
+    await saveRun(state);
+    return state;
+  });
 }
 
 export async function startJudge(runId) {
-  const state = await loadRun(runId);
-  if (!state) throw new Error(`run not found: ${runId}`);
-  recomputeRunStatus(state);
-  if (!allBatchesCompleted(state) && state.tasks?.length) throw new Error('final judge is allowed only after all batches completed');
-  const outDir = roleDir(pathForRun(runId), 'judge');
-  await ensureDir(outDir);
-  const judgeInputPath = path.join(outDir, 'judge_input.json');
-  const judgeInput = await buildJudgeInput(state);
-  await writeJsonAtomic(judgeInputPath, judgeInput);
-  const prompt = defaultJudgePrompt(state, judgeInputPath);
-  const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(pathForRun(runId)), prompt, sandbox: 'read-only', cwd: state.repo, outDir });
-  state.judge = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir };
-  state.status = 'judging';
-  await saveRun(state);
-  child.onExit(async code => {
-    const s = await loadRun(runId); if (!s || s.status === 'stopped') return;
-    s.judge.exitCode = code; s.judge.endedAt = nowIso(); s.judge.status = code === 0 ? 'completed' : 'failed';
-    const text = await readTextMaybe(path.join(outDir, 'last_message.md'), 1000000);
-    const verdict = extractFirstJsonObject(text);
-    if (verdict) { s.judge.verdict = verdict; await writeJsonAtomic(path.join(outDir, 'verdict.json'), verdict); }
-    s.status = s.judge.status === 'completed' ? 'judged' : 'judge_failed';
-    await saveRun(s);
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) throw new Error(`run not found: ${runId}`);
+    recomputeRunStatus(state);
+    if (!allBatchesCompleted(state) && state.tasks?.length) throw new Error('final judge is allowed only after all batches completed');
+    const outDir = roleDir(pathForRun(runId), 'judge');
+    await ensureDir(outDir);
+    const judgeInputPath = path.join(outDir, 'judge_input.json');
+    const judgeInput = await buildJudgeInput(state);
+    await writeJsonAtomic(judgeInputPath, judgeInput);
+    const prompt = defaultJudgePrompt(state, judgeInputPath);
+    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(pathForRun(runId)), prompt, sandbox: 'read-only', cwd: state.repo, outDir });
+    state.judge = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir };
+    state.status = 'judging';
+    await saveRun(state);
+    child.onExit(async code => {
+      await withRunStateLock(runId, async () => {
+        const s = await loadRun(runId); if (!s || s.status === 'stopped') return;
+        s.judge.exitCode = code; s.judge.endedAt = nowIso(); s.judge.status = code === 0 ? 'completed' : 'failed';
+        const text = await readTextMaybe(path.join(outDir, 'last_message.md'), 1000000);
+        const verdict = extractFirstJsonObject(text);
+        if (verdict) { s.judge.verdict = verdict; await writeJsonAtomic(path.join(outDir, 'verdict.json'), verdict); }
+        s.status = s.judge.status === 'completed' ? 'judged' : 'judge_failed';
+        await saveRun(s);
+      });
+    });
+    return state;
   });
-  return state;
 }
 
 export async function refreshRun(runId, appClient = null) {
@@ -568,21 +712,23 @@ export async function refreshRun(runId, appClient = null) {
 }
 
 async function loadAndRefreshRun(runId, appClient = null, { light = false } = {}) {
-  const state = await loadRun(runId);
-  if (!state) return null;
-  state.runner = state.runner || RUNNER;
-  await refreshRole(state, state.planner, roleDir(pathForRun(runId), 'planner'));
-  await recoverCompletedPlanner(state);
-  for (const task of state.tasks || []) await refreshTask(state, task);
-  await refreshRole(state, state.judge, roleDir(pathForRun(runId), 'judge'));
-  await recoverCompletedJudge(state);
-  aggregateRunTmuxMetadata(state);
-  recomputeRunStatus(state);
-  await scheduleMoreWorkers(state);
-  recomputeRunStatus(state);
-  if (appClient && !light) await enrichFromAppServer(state, appClient).catch(e => { state.appServerError = e.message; });
-  await saveRun(state);
-  return state;
+  return await withRunStateLock(runId, async () => {
+    const state = await loadRun(runId);
+    if (!state) return null;
+    state.runner = state.runner || RUNNER;
+    await refreshRole(state, state.planner, roleDir(pathForRun(runId), 'planner'));
+    await recoverCompletedPlanner(state);
+    for (const task of state.tasks || []) await refreshTask(state, task);
+    await refreshRole(state, state.judge, roleDir(pathForRun(runId), 'judge'));
+    await recoverCompletedJudge(state);
+    aggregateRunTmuxMetadata(state);
+    recomputeRunStatus(state);
+    await scheduleMoreWorkers(state);
+    recomputeRunStatus(state);
+    if (appClient && !light) await enrichFromAppServer(state, appClient).catch(e => { state.appServerError = e.message; });
+    await saveRun(state);
+    return state;
+  });
 }
 
 async function recoverCompletedPlanner(state) {
@@ -742,6 +888,43 @@ async function standardFiles(dir) {
 function currentBatch(state) {
   ensureBatchShape(state);
   return (state.batches || []).find(b => b.status !== 'completed');
+}
+
+function currentBlockedBatch(state) {
+  ensureBatchShape(state);
+  return (state.batches || []).find(b => b.status === 'failed' || b.status === 'blocked' || b.status === 'running' && (b.tasks || []).some(t => ['failed', 'unknown'].includes(t.status)));
+}
+
+function canAutoRetryTask(task, maxRetries = 1) {
+  if (!task) return false;
+  if (!['failed', 'unknown'].includes(task.status)) return false;
+  if (Number(task.retryCount || 0) >= Number(maxRetries || 1)) return false;
+  return true;
+}
+
+async function retryTasksInState(state, taskIds = null, { auto = false, maxRetries = 1, reason = 'retry' } = {}) {
+  ensureBatchShape(state);
+  const selectedTaskIds = taskIds ? new Set(taskIds.map(id => safeIdPart(id))) : null;
+  const tasksToRetry = (state.tasks || []).filter(task => {
+    if (selectedTaskIds && !selectedTaskIds.has(task.id)) return false;
+    if (!['failed', 'unknown'].includes(task.status)) return false;
+    if (auto && !canAutoRetryTask(task, maxRetries)) return false;
+    return true;
+  });
+  if (!tasksToRetry.length) return { retried: [], state };
+  for (const task of tasksToRetry) {
+    if (hasLiveRunnerProcess(state, task.id, task)) throw new Error(`task still has a live process: ${task.id}`);
+    const batch = (state.batches || []).find(item => item.id === task.batchId);
+    task.retryReason = reason;
+    await rotateWorkerAttempt(state, task);
+    const batchTask = batch?.tasks?.find(item => item.id === task.id);
+    if (batchTask && batchTask !== task) Object.assign(batchTask, task);
+  }
+  recomputeRunStatus(state);
+  if (hasPendingRunnableBatch(state)) state.status = 'running';
+  await scheduleMoreWorkers(state);
+  recomputeRunStatus(state);
+  return { retried: tasksToRetry.map(task => task.id), state };
 }
 
 async function scheduleMoreWorkers(state) {
@@ -904,7 +1087,7 @@ function runDurationEndOfState(s) {
   return times.length ? new Date(Math.max(...times)).toISOString() : s.updatedAt;
 }
 
-function summaryOfRun(s) {
+export function summaryOfRun(s) {
   const tasks = s.tasks || [];
   return { runId: s.runId, label: s.label, repo: s.repo, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
 }

@@ -11,12 +11,15 @@ test('public inline script remains parseable', () => {
   assert.doesNotThrow(() => new vm.Script(script));
 });
 
-test('header and browser tab use Input Kanban icons', () => {
+test('header, browser tab, and footer show Input Kanban identity', () => {
   assert.match(html, /<link rel="icon" type="image\/png" sizes="32x32" href="\/assets\/input-kanban-favicon-32\.png\?v=2" \/>/);
   assert.match(html, /<link rel="shortcut icon" type="image\/png" href="\/assets\/input-kanban-favicon-32\.png\?v=2" \/>/);
   assert.match(html, /<link rel="mask-icon" href="\/assets\/input-kanban-mask-icon\.svg" color="#2563eb" \/>/);
   assert.match(html, /<link rel="apple-touch-icon" sizes="180x180" href="\/assets\/input-kanban-apple-touch-icon\.png\?v=2" \/>/);
   assert.match(html, /<h1 class="brand"><img class="brand-icon" src="\/assets\/input-kanban-icon\.png"/);
+  assert.match(html, /<footer id="pageFooter" class="page-footer">版本：-<\/footer>/);
+  assert.match(html, /\.page-footer/);
+  assert.match(script, /h\.version \? `版本：v\$\{h\.version\}` : '版本：未知（请重启服务）'/);
 });
 
 test('create form exposes worker sandbox selector', () => {
@@ -24,6 +27,18 @@ test('create form exposes worker sandbox selector', () => {
   assert.match(html, /danger-full-access（高风险，跳过沙箱限制）/);
   assert.match(script, /workerSandbox: workerSandbox\.value/);
   assert.match(script, /api\(`\/api\/runs\/\$\{selectedRun\}\/plan`, \{ method: 'POST' \}\)/);
+  assert.match(script, /async function maybeAutoAdvanceRunSummaries\(runs\)/);
+  assert.match(script, /await maybeAutoAdvanceRunSummaries\(latestRuns\)/);
+  assert.match(script, /async function maybeAutoAdvanceSelectedRun\(\)/);
+  assert.match(script, /state\.status === 'planned'/);
+  assert.match(script, /api\(`\/api\/runs\/\$\{runId\}\/dispatch`, \{method:'POST'\}\)/);
+  assert.match(script, /state\.status === 'batches_completed'/);
+  assert.match(script, /api\(`\/api\/runs\/\$\{runId\}\/judge`, \{method:'POST'\}\)/);
+  assert.match(script, /async function autoRetryRun\(runId, refreshSelectedAfter = true\)/);
+  assert.match(script, /api\(`\/api\/runs\/\$\{runId\}\/retry`, \{method:'POST'/);
+  assert.match(script, /AUTO_MAX_RETRIES = 1/);
+  assert.match(script, /state\.status === 'batch_blocked'/);
+  assert.match(script, /if \(!skipAutoAdvance\) await maybeAutoAdvanceSelectedRun\(\)/);
   assert.match(script, /planner already running\/i\.test\(detail\)\) return '任务拆分正在进行中，请稍后查看结果。'/);
   assert.match(script, /console\.error\('操作失败', error\)/);
   assert.match(script, /任务仍在执行中，请先停止后再归档。/);

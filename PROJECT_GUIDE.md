@@ -87,6 +87,19 @@ Supported result options:
 
 `input-kanban result [runId]` prints the final judge result. It prefers `judge/verdict.json` and falls back to `judge/last_message.md`. If no `runId` is provided, it uses the latest run. `--copy` sends the result to the system clipboard.
 
+Supported retry options:
+
+```text
+<runId>
+[taskId]
+--runs-dir <path>
+--reason <text>
+--max-retries <n>
+--json
+```
+
+`input-kanban retry <runId> [taskId]` retries failed or unknown worker tasks. If `taskId` is omitted, it retries failed/unknown tasks in the current blocked batch. Before retrying, the worker output directory is moved under `worker_attempts/<taskId>/attempt-XX/` so failed logs, stderr, exit code, and last message remain available for audit. Retry resets the task to `pending`, records retry history, then reuses the existing scheduler.
+
 Supported stop options:
 
 ```text
@@ -124,6 +137,38 @@ Default behavior:
 - default port: `8787`;
 - default runs directory: `~/.input-kanban/runs`;
 - default Codex binary: `codex`.
+
+## Agent Workflow
+
+This project already exposes an agent-friendly CLI path. Use `--json` for machine-readable output and `runs --active` to discover current work before asking for per-run details.
+
+Discovery / lookup pattern:
+
+```text
+input-kanban --json runs --active
+input-kanban --json status <runId>
+input-kanban --json result <runId>
+input-kanban --json stop <runId>
+```
+
+Key points:
+
+- `runs` lists visible batches from the shared runs directory; `--active` filters to runs that have not reached a terminal state or still have running tasks.
+- `status` resolves a single run by id and defaults to the latest run when the id is omitted.
+- `result` prefers `judge/verdict.json` and falls back to `judge/last_message.md`; `--copy` copies the result to the clipboard.
+- `stop` requires an explicit `runId` and uses the same stop path as the Web dashboard.
+- `retry` retries failed/unknown workers while preserving the failed attempt directory.
+- `submit` defaults to auto mode: planner -> dispatch -> final judge, with one automatic retry for `batch_blocked` by default. `--no-auto` keeps create + plan only, and `-d/--detach` moves the auto loop to a background supervisor.
+- The Web dashboard now follows the same default auto behavior while the page is open: after planning it auto-dispatches planned runs and auto-starts the final judge once all batches complete.
+
+Example agent loop:
+
+```text
+1. input-kanban --json runs --active
+2. input-kanban --json status <runId>
+3. input-kanban --json result <runId>
+4. input-kanban --json stop <runId>   # only when necessary
+```
 
 ## Data Model
 
@@ -190,17 +235,80 @@ If the planner returns valid JSON with zero tasks, the run is marked `plan_empty
 
 ## Worker Failure Policy
 
-Workers are not automatically retried.
+Failed or unknown workers can be retried explicitly with `input-kanban retry <runId> [taskId]` or via Web/API retry. CLI/Web auto mode may retry a blocked batch once by default.
 
-Reason: a worker may have already changed files in the target repository. Retrying could duplicate edits, overwrite partial work, or create conflicts.
+Retry rules:
 
-Recovery options:
+- Retry is an orchestrator-level state transition, not a runner auto-restart.
+- Retry refuses stopped or archived runs.
+- Retry refuses tasks that still have a live process.
+- Retry preserves failed output under `worker_attempts/<taskId>/attempt-XX/` before resetting the task.
+- Retry resets failed/unknown tasks to `pending`, records retry history, and reuses the existing scheduler.
 
-- Inspect `events.pretty`, `stderr.log`, `last_message.md`, and artifacts.
+Recovery options after retries are exhausted:
+
+- Inspect `events.pretty`, `stderr.log`, `last_message.md`, archived worker attempts, and artifacts.
 - Manually mark `failed` or `unknown` workers as completed if the user confirms the work is actually done.
 - Manual completion writes `workers/<taskId>/manual_completion.json`.
 - If the user pastes a manual success result, it is saved as `workers/<taskId>/manual_result.md` and included in final judge input.
 - The UI preserves the original failed or unknown status while also showing the manual completion marker.
+
+## Run State Concurrency and Retry Implementation Notes
+
+### Failure Retry
+
+Retry is implemented as an explicit orchestrator state transition.
+
+Implemented behavior:
+
+- `input-kanban retry <runId> [taskId]` retries either one failed/unknown task or, when `taskId` is omitted, failed/unknown tasks in the current blocked batch.
+- CLI/Web auto mode retries a `batch_blocked` run once by default via the same retry path.
+- Retry reuses the existing scheduler and does not trigger replanning.
+- Planner retry remains separate and only applies before any worker or judge starts.
+
+Safety requirements enforced by implementation:
+
+1. Refuse retry when the run is `stopped` or `archived`.
+2. Refuse retry if the target task still has a live process.
+3. Preserve the failed attempt directory under `worker_attempts/<taskId>/attempt-XX/` before resetting the task to `pending`.
+4. Reset the run back to `running` when there is pending retry work, then let the existing scheduler start workers naturally.
+5. Keep retry counters and history on the task so agents can tell transient noise from deterministic task failure.
+
+Why this shape was favored:
+
+- Runner-level auto-restart hides intent from the state machine and would have to be duplicated for headless/tmux.
+- Auto-replan is too heavy for a single failed worker and would throw away useful per-task evidence.
+- The retry decision belongs to orchestration, where agents and humans can see it explicitly.
+
+### `run_state.json` Concurrency Safety
+
+The backend now uses a per-run lock file to protect state writes. Atomic writes prevent partial files; the lock prevents common lost-update races between detach supervisors, CLI commands, and Web API actions.
+
+Implemented shape:
+
+- The lock file is `run_state.lock` inside the run directory.
+- Lock acquisition uses exclusive file creation and stores `pid`, `runId`, and timestamp in the lock file.
+- Stale locks can be recovered when the owning PID is gone and the lock is older than the stale threshold.
+- Lock granularity is one run, so different runs do not block each other.
+- State transition paths re-read the run inside the lock before mutating it.
+
+Write paths under lock include:
+
+- planner start and completion callback;
+- dispatch;
+- retry;
+- stop;
+- archive;
+- rename;
+- manual task completion;
+- judge start and completion callback;
+- refresh/recovery state materialization.
+
+Risk notes:
+
+- A stale-lock timeout that is too short can accidentally steal a lock from a slow or paused process; too long slows recovery.
+- `child.onExit` callbacks must continue to take the write lock.
+- If the repository ever moves to shared network storage, the current single-machine exclusive-file assumptions should be re-evaluated.
 
 ## Stop and Archive
 
@@ -307,6 +415,7 @@ runs/<runId>/plan.json
 runs/<runId>/planner/
 runs/<runId>/planner_attempts/attempt-XX/
 runs/<runId>/workers/<taskId>/
+runs/<runId>/worker_attempts/<taskId>/attempt-XX/
 runs/<runId>/judge/judge_input.json
 runs/<runId>/workers/<taskId>/events_timed.jsonl
 runs/<runId>/workers/<taskId>/manual_result.md
@@ -324,6 +433,7 @@ runs/<runId>/judge/verdict.json
 - `POST /api/runs/:runId/plan`
 - `POST /api/runs/:runId/dispatch`
 - `POST /api/runs/:runId/judge`
+- `POST /api/runs/:runId/retry`
 - `POST /api/runs/:runId/stop`
 - `POST /api/runs/:runId/archive`
 - `PATCH /api/runs/:runId/label`
