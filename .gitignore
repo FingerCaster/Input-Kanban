@@ -4,3 +4,8 @@ runs/
 node_modules/
 .env.local
 ENVIRONMENT.local.md
+
+.pi/
+artifacts/
+tmp/
+.claude/
