@@ -60,6 +60,8 @@
     .muted { color: var(--muted); font-size: 12px; }
     .hidden { display: none; }
     .toolbar { margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 10px 0 8px; }
+    .section-header h2 { margin: 0; }
     .workspace-filter-panel { margin: 4px 0 10px; display: flex; align-items: center; gap: 6px; }
     .workspace-filter-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 7px 9px; color: #cbd5e1; }
     .task-text { max-height: 180px; color: #cbd5e1; }
@@ -131,10 +133,10 @@
 <main>
   <div class="sidebar">
     <section>
-      <div class="toolbar">
-        <button onclick="showCreateForm()">新建任务批次</button>
+      <div class="section-header">
+        <h2>任务批次</h2>
+        <button class="secondary" onclick="showCreateForm()">新建</button>
       </div>
-      <h2>任务批次</h2>
       <div class="workspace-filter-panel">
         <select id="workspaceFilterSelect" class="workspace-filter-select" onchange="setWorkspaceFilter(this.value)" title="未筛选工作区"></select>
         <span id="runsLoadHint" class="runs-load-icon" title="批次列表尚未加载" aria-label="批次列表尚未加载">ⓘ</span>

@@ -43,6 +43,7 @@ input-kanban \
 - `input-kanban serve` starts a lightweight background scheduler that uses the same orchestrator auto-advance path as CLI `submit --auto` / `input-kanban auto <runId>`. It advances planned runs, serial batches, final judge startup, and bounded automatic retries without relying on an open browser tab.
 - `KANBAN_RUNNER` / `--runner tmux` runs Codex tasks inside tmux windows while keeping scheduling and status tracking in the Node.js orchestrator.
 - `KANBAN_RUNNER=tmux` is optional. Use it when you want live terminal visibility into planner, worker, and final judge sessions.
+- With `KANBAN_RUNNER=tmux`, stopping and restarting `input-kanban serve` does not interrupt already-running Codex sessions; tmux keeps them alive and the scheduler resumes after restart. Do not assume the same safety for `headless` runner child processes.
 - tmux mode uses one session per run and one window for planner, each batch, and judge. Batch windows contain an overview pane plus worker panes.
 - tmux role windows stay open after the Codex command exits. The runner writes `exit_code` before entering the keep-open shell so Node.js status refresh can continue to advance from filesystem state.
 - The dashboard exposes the run-level `tmux attach-session` copy action after tmux metadata is available. File viewer panels do not repeat tmux terminal details.

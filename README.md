@@ -117,6 +117,8 @@ input-kanban --open
 
 tmux 模式仍由 Node.js 负责 batch barrier、`maxParallel`、final judge 顺序和 `judge_input.json` 生成。每个角色输出目录会写入 `run.sh` 和 `tmux.json`，状态继续由 `events.jsonl`、`stderr.log`、`last_message.md`、`exit_code` 和既有 artifact 文件驱动。tmux 角色命令完成后会先写入 `exit_code`，再保留 window，方便查看现场；需要关闭时由用户在 tmux 里手动退出。
 
+如果当前使用的是 `--runner tmux`，中断并重新启动 `input-kanban serve` 不会中断正在执行中的 Codex 会话；tmux session 会继续运行，服务重启后 scheduler 会重新接管后续推进。若使用 `headless` runner，则不应假设服务重启对正在运行的子进程是安全的。
+
 tmux 模式是可选能力，主要用于在终端里实时查看每个 Codex 角色的执行过程。`codex exec` 当前属于非交互模式，默认不会弹出人工 approval；如果创建任务时选择 `danger-full-access`，表示显式放开 worker sandbox 限制，应只在受控测试工作区中使用。
 
 看板会在 run 生成 tmux 元数据后显示 `复制tmux attach指令`。文件查看区域不再重复展示 tmux 终端信息；如需查看现场，请从批次详情顶部复制 attach 指令进入 tmux session。

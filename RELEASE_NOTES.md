@@ -1,5 +1,18 @@
 # Release Notes
 
+## v0.0.11
+
+### Highlights
+
+- Simplify the Web sidebar header: show `任务批次` as the section title with a compact `新建` action on the right, removing repeated wording.
+- Document safe `input-kanban serve` restarts for `tmux` runner: already-running Codex sessions in tmux continue while the server is down, and the scheduler resumes after restart.
+- Clarify that `headless` runner does not provide the same safe-restart guarantee for in-flight child processes.
+
+### Verification
+
+- `npm run check` passed with 63 tests.
+- `npm pack --dry-run` passed before release prep.
+
 ## v0.0.10
 
 ### Highlights

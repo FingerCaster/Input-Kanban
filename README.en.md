@@ -117,6 +117,8 @@ Defaults:
 
 tmux mode still leaves batch barriers, `maxParallel`, final judge sequencing, and `judge_input.json` generation in Node.js. Each role output directory gets `run.sh` and `tmux.json`; status continues to be driven by `events.jsonl`, `stderr.log`, `last_message.md`, `exit_code`, and existing artifact files. After a tmux role command finishes, it writes `exit_code` first and then keeps the window open for inspection; the user closes the window manually from tmux.
 
+If you are using `--runner tmux`, stopping and restarting `input-kanban serve` does not interrupt Codex sessions that are already running; the tmux session keeps going, and the scheduler resumes orchestration after the server comes back. With the `headless` runner, do not assume that restarting the service is safe for in-flight child processes.
+
 tmux mode is optional and intended for live terminal viewing of each Codex role. `codex exec` is currently non-interactive and does not normally show manual approval prompts; if you select `danger-full-access` when creating a run, you explicitly relax the worker sandbox and should only do so in a controlled test workspace.
 
 After run-level tmux metadata is available, the dashboard shows `Copy tmux attach command`. The file viewer no longer repeats tmux terminal details; use the run detail header to copy the attach command and inspect the tmux session.

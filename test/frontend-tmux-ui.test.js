@@ -22,6 +22,12 @@ test('header, browser tab, and footer show Input Kanban identity', () => {
   assert.match(script, /h\.version \? `版本：v\$\{h\.version\}` : '版本：未知（请重启服务）'/);
 });
 
+test('sidebar header keeps a compact create action', () => {
+  assert.match(html, /<div class="section-header">\s*<h2>任务批次<\/h2>[\s\S]*?>新建<\/button>/);
+  assert.match(html, /\.section-header/);
+  assert.doesNotMatch(html, /<button onclick="showCreateForm\(\)">新建任务批次<\/button>/);
+});
+
 test('create form exposes worker sandbox selector', () => {
   assert.match(html, /<select id="workerSandbox">/);
   assert.match(html, /danger-full-access（高风险，跳过沙箱限制）/);
