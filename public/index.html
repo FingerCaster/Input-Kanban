@@ -22,8 +22,8 @@
     .sidebar { position: sticky; top: 18px; height: calc(100vh - 36px); }
     .sidebar section { height: 100%; display: flex; flex-direction: column; box-sizing: border-box; }
     section { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
-    textarea, input { width: 100%; box-sizing: border-box; background: #020617; color: var(--text); border: 1px solid #475569; border-radius: 9px; padding: 9px 10px; outline: none; }
-    textarea:focus, input:focus { border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(37,99,235,.25); }
+    textarea, input, select { width: 100%; box-sizing: border-box; background: #020617; color: var(--text); border: 1px solid #475569; border-radius: 9px; padding: 9px 10px; outline: none; }
+    textarea:focus, input:focus, select:focus { border-color: #60a5fa; box-shadow: 0 0 0 2px rgba(37,99,235,.25); }
     textarea { min-height: 240px; }
     label { display: block; margin-top: 10px; color: #cbd5e1; font-weight: 700; }
     button { background: var(--blue); color: white; border: 0; border-radius: 9px; padding: 8px 11px; margin: 4px 4px 4px 0; cursor: pointer; font-weight: 700; }
@@ -60,8 +60,12 @@
     .muted { color: var(--muted); font-size: 12px; }
     .hidden { display: none; }
     .toolbar { margin: 8px 0 12px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+    .workspace-filter-panel { margin: 4px 0 10px; display: flex; align-items: center; gap: 6px; }
+    .workspace-filter-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 7px 9px; color: #cbd5e1; }
     .task-text { max-height: 180px; color: #cbd5e1; }
     .empty { color: var(--muted); padding: 18px 0; }
+    .runs-load-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; cursor: help; opacity: .72; }
+    .runs-load-icon:hover { opacity: 1; color: #cbd5e1; border-color: var(--line-strong); }
     .run-list { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
     .run-list-more { width: 100%; margin-top: 4px; }
     .run-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel-2); cursor: pointer; transition: border-color .15s, transform .15s, background .15s; }
@@ -129,21 +133,24 @@
     <section>
       <div class="toolbar">
         <button onclick="showCreateForm()">新建任务批次</button>
-        <button class="secondary" onclick="refreshRuns()">刷新批次列表</button>
       </div>
       <h2>任务批次</h2>
-      <div id="runs" class="run-list"></div>
+      <div class="workspace-filter-panel">
+        <select id="workspaceFilterSelect" class="workspace-filter-select" onchange="setWorkspaceFilter(this.value)" title="未筛选工作区"></select>
+        <span id="runsLoadHint" class="runs-load-icon" title="批次列表尚未加载" aria-label="批次列表尚未加载">ⓘ</span>
+      </div>
+      <div id="runs" class="run-list"><div class="empty">批次列表加载中...</div></div>
     </section>
   </div>
   <div>
     <section id="createPanel" class="hidden">
       <h2>新建任务批次</h2>
       <label>批次名称</label><input id="label" value="codex-task" />
-      <label>目标仓库</label><input id="repo" />
+      <label>工作区</label><input id="repo" />
       <label>运行目录</label><input id="runsDir" readonly />
       <label>最大并发数</label><input id="maxParallel" type="number" value="3" min="1" max="16" />
       <label>Worker 沙箱</label><select id="workerSandbox">
-        <option value="workspace-write" selected>workspace-write（默认，允许写当前仓库）</option>
+        <option value="workspace-write" selected>workspace-write（默认，允许写当前工作区）</option>
         <option value="read-only">read-only（只读）</option>
         <option value="danger-full-access">danger-full-access（高风险，跳过沙箱限制）</option>
       </select>
@@ -207,18 +214,17 @@ let selectedTask = null;
 let selectedFileName = null;
 let manualCompleteTaskId = null;
 let pendingArchiveRunId = null;
-const autoDispatchingRuns = new Set();
-const autoJudgingRuns = new Set();
-const autoRetryingRuns = new Set();
-const autoRetrySkippedRuns = new Set();
 let currentState = null;
 let lastAutoRefreshAt = null;
 let runListVisibleCount = 10;
 let latestRuns = [];
+let workspaceCatalogRuns = [];
 const statusByRunId = new Map();
 const AUTO_REFRESH_MS = 3000;
-const AUTO_MAX_RETRIES = 1;
 const RUN_LIST_PAGE_SIZE = 10;
+const WORKSPACE_FILTER_ALL = '';
+let currentWorkspacePath = '';
+let selectedWorkspaceFilter = localStorage.getItem('input-kanban.workspaceFilter') || WORKSPACE_FILTER_ALL;
 
 async function api(path, opts={}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -291,6 +297,7 @@ function basenamePath(value) {
 function metaChip(label, value, { title = value, danger = false, long = false, extra = '' } = {}) {
   return `<span class="meta-chip ${danger ? 'danger' : ''} ${long ? 'long' : ''}" title="${esc(title)}"><span class="meta-label">${esc(label)}</span><span class="meta-value">${esc(value)}</span>${extra}</span>`;
 }
+function gitChip() { return '<span class="meta-chip" title="Git 工作区"><span class="meta-value">Git</span></span>'; }
 function editIcon() {
   return '<svg class="icon-svg" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5Z" fill="currentColor"/><path d="m16 4.5 3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 }
@@ -335,9 +342,12 @@ function runListHasTmuxMetadata(run) {
 
 async function loadHealth() {
   const h = await api('/api/health');
-  document.getElementById('repo').value = h.defaultRepo;
+  currentWorkspacePath = h.defaultWorkspace || h.defaultRepo || '';
+  document.getElementById('repo').value = currentWorkspacePath;
   document.getElementById('runsDir').value = h.runsDir;
   document.getElementById('pageFooter').textContent = h.version ? `版本：v${h.version}` : '版本：未知（请重启服务）';
+  renderWorkspaceFilterOptions();
+  updateWorkspaceFilterTitle();
 }
 function showCreateForm() {
   selectedRun = null; selectedTask = null; selectedFileName = null; currentState = null;
@@ -352,7 +362,7 @@ function hideCreateForm() {
   document.getElementById('filePanel').classList.remove('hidden');
 }
 async function createRun() {
-  const body = { label: label.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, taskText: taskText.value };
+  const body = { label: label.value, workspace: repo.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, taskText: taskText.value };
   const r = await api('/api/runs', { method: 'POST', body: JSON.stringify(body) });
   selectedRun = r.runId; selectedTask = null; selectedFileName = null;
   clearFileView();
@@ -362,10 +372,28 @@ async function createRun() {
   await refreshSelected();
 }
 async function refreshRuns() {
-  const data = await api('/api/runs');
-  latestRuns = data.runs || [];
-  renderRunList();
-  await maybeAutoAdvanceRunSummaries(latestRuns);
+  const startedAt = performance.now();
+  const hint = document.getElementById('runsLoadHint');
+  if (hint) { hint.title = '批次列表加载中...'; hint.setAttribute('aria-label', hint.title); }
+  if (!latestRuns.length) document.getElementById('runs').innerHTML = '<div class="empty">批次列表加载中...</div>';
+  try {
+    const params = new URLSearchParams();
+    if (selectedWorkspaceFilter && selectedWorkspaceFilter !== WORKSPACE_FILTER_ALL) params.set('workspace', selectedWorkspaceFilter);
+    const [filteredData, catalogData] = await Promise.all([
+      api(`/api/runs${params.toString() ? `?${params.toString()}` : ''}`),
+      api('/api/runs?includeArchived=1')
+    ]);
+    latestRuns = filteredData.runs || [];
+    workspaceCatalogRuns = catalogData.runs || [];
+    renderWorkspaceFilterOptions();
+    renderRunList();
+    updateWorkspaceFilterTitle();
+    if (hint) { hint.title = `加载 ${Math.round(performance.now() - startedAt)}ms｜显示 ${latestRuns.length} 个批次`; hint.setAttribute('aria-label', hint.title); }
+  } catch (error) {
+    console.error('批次列表加载失败', error);
+    if (hint) { hint.title = `批次列表加载失败｜${errorDetail(error)}`; hint.setAttribute('aria-label', hint.title); }
+    if (!latestRuns.length) document.getElementById('runs').innerHTML = '<div class="empty">批次列表加载失败</div>';
+  }
 }
 function renderRunList() {
   const visibleRuns = latestRuns.slice(0, runListVisibleCount);
@@ -373,7 +401,8 @@ function renderRunList() {
     <div class="run-card ${selectedRun === r.runId ? 'active' : ''}" onclick="selectRun('${r.runId}')" onmouseleave="clearArchiveConfirm('${r.runId}')">
       <div class="run-card-title"><span class="run-card-name-wrap"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><span class="run-card-title-actions"><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, '${r.runId}')">${editIcon()}</button><button class="secondary copy-btn rename-btn ${pendingArchiveRunId === r.runId ? 'archive-confirm-btn' : ''}" title="${pendingArchiveRunId === r.runId ? '再次点击确认归档' : '归档任务批次（运行中请先停止）'}" onclick="archiveRunFromCard(event, '${r.runId}')">${pendingArchiveRunId === r.runId ? '确认' : archiveIcon()}</button></span></span><span>${pill(r.status)}</span></div>
       <div class="run-card-meta">
-        ${metaChip('仓库', basenamePath(r.repo), { title: r.repo, long: true, extra: `<button class="secondary copy-btn" title="复制仓库地址" onclick="copyRunRepoPath(event, '${r.runId}')">⧉</button>` })}
+        ${metaChip('工作区', basenamePath(r.workspacePath || r.repo), { title: r.workspacePath || r.repo, long: true, extra: `<button class="secondary copy-btn" title="复制工作区地址" onclick="copyRunRepoPath(event, '${r.runId}')">⧉</button>` })}
+        ${r.git?.isGit ? gitChip() : ''}
         ${metaChip('创建', formatDateTime(r.createdAt))}
         ${metaChip('用时', runCardDurationText(r))}
         ${metaChip('进度', `${r.completed}/${r.total}`)}
@@ -390,8 +419,48 @@ function showMoreRuns() {
   runListVisibleCount += RUN_LIST_PAGE_SIZE;
   renderRunList();
 }
+function renderWorkspaceFilterOptions() {
+  const select = document.getElementById('workspaceFilterSelect');
+  if (!select) return;
+  const workspaces = new Map();
+  for (const run of workspaceCatalogRuns) {
+    const workspacePath = run.workspacePath || run.repo || '';
+    if (!workspacePath) continue;
+    const item = workspaces.get(workspacePath) || { label: basenamePath(workspacePath), count: 0, git: !!run.git?.isGit };
+    item.count += 1;
+    item.git = item.git || !!run.git?.isGit;
+    workspaces.set(workspacePath, item);
+  }
+  const currentValue = workspaces.has(selectedWorkspaceFilter) ? selectedWorkspaceFilter : WORKSPACE_FILTER_ALL;
+  if (currentValue !== selectedWorkspaceFilter) {
+    selectedWorkspaceFilter = currentValue;
+    localStorage.setItem('input-kanban.workspaceFilter', selectedWorkspaceFilter);
+  }
+  const options = [[WORKSPACE_FILTER_ALL, '工作区筛选'], ...[...workspaces.entries()].map(([workspacePath, item]) => {
+    const gitText = item.git ? ' · Git' : '';
+    return [workspacePath, `${item.label}${gitText} (${item.count})`];
+  })];
+  select.innerHTML = options.map(([value, label]) => `<option value="${esc(value)}">${esc(label)}</option>`).join('');
+  select.value = selectedWorkspaceFilter;
+  updateWorkspaceFilterTitle();
+}
+function updateWorkspaceFilterTitle() {
+  const select = document.getElementById('workspaceFilterSelect');
+  if (!select) return;
+  if (selectedWorkspaceFilter === WORKSPACE_FILTER_ALL) {
+    select.title = currentWorkspacePath ? `未筛选工作区｜默认工作区：${currentWorkspacePath}` : '未筛选工作区';
+  } else {
+    select.title = `当前筛选：${selectedWorkspaceFilter}`;
+  }
+}
+function setWorkspaceFilter(value) {
+  selectedWorkspaceFilter = String(value || '').trim();
+  localStorage.setItem('input-kanban.workspaceFilter', selectedWorkspaceFilter);
+  runListVisibleCount = RUN_LIST_PAGE_SIZE;
+  refreshRuns().catch(console.error);
+}
 async function selectRun(id) { selectedRun = id; selectedTask = null; selectedFileName = null; clearFileView(); hideCreateForm(); await refreshSelected(); }
-async function refreshSelected({auto=false, skipAutoAdvance=false} = {}) {
+async function refreshSelected({auto=false} = {}) {
   if (!selectedRun) return;
   currentState = await api(`/api/runs/${selectedRun}/status`);
   statusByRunId.set(selectedRun, currentState);
@@ -403,22 +472,24 @@ async function refreshSelected({auto=false, skipAutoAdvance=false} = {}) {
   await loadTaskDescription();
   renderTasks(); await refreshRuns();
   if (selectedTask && selectedFileName) await loadFile(selectedFileName, { preserveScroll: true });
-  if (!skipAutoAdvance) await maybeAutoAdvanceSelectedRun();
 }
 function renderSelectedHeader() {
   if (!currentState) return '<div class="muted">未选择任务批次</div>';
   const sandbox = currentState.workerSandbox || 'workspace-write';
   const chips = [
     metaChip('Run ID', currentState.runId, { long: true }),
-    metaChip('仓库', basenamePath(currentState.repo), {
-      title: currentState.repo,
+    metaChip('工作区', basenamePath(currentState.workspacePath || currentState.repo), {
+      title: currentState.workspacePath || currentState.repo,
       long: true,
-      extra: `<button class="secondary copy-btn" title="复制仓库地址" onclick="copyRepoPath(event)">⧉</button>`
+      extra: `<button class="secondary copy-btn" title="复制工作区地址" onclick="copyRepoPath(event)">⧉</button>`
     }),
     metaChip('沙箱', sandbox, { danger: sandbox === 'danger-full-access' }),
     metaChip('开始', formatDateTime(currentState.createdAt)),
     metaChip('用时', formatDurationMs(durationSeconds(currentState.createdAt, runDurationEnd(currentState)) * 1000))
   ];
+  if (currentState.git?.isGit || currentState.workspace?.git?.isGit) {
+    chips.push(gitChip());
+  }
   if (currentState.runner === 'tmux') {
     if (hasRunTmuxMetadata(currentState)) {
       chips.push(metaChip('终端', tmuxSessionName(currentState), {
@@ -633,7 +704,7 @@ function hideExecutionSummary() {
   el.classList.add('hidden');
   el.innerHTML = '';
 }
-async function copyRepoPath(event, repoPath = currentState?.repo || '') {
+async function copyRepoPath(event, repoPath = currentState?.workspacePath || currentState?.repo || '') {
   event.stopPropagation();
   if (!repoPath) return;
   try {
@@ -641,11 +712,11 @@ async function copyRepoPath(event, repoPath = currentState?.repo || '') {
     event.currentTarget.textContent = '已复制';
     setTimeout(() => { event.currentTarget.textContent = '⧉'; }, 900);
   } catch {
-    prompt('复制仓库地址', repoPath);
+    prompt('复制工作区地址', repoPath);
   }
 }
 async function copyRunRepoPath(event, runId) {
-  const repoPath = latestRuns.find(run => run.runId === runId)?.repo || '';
+  const repoPath = latestRuns.find(run => run.runId === runId)?.workspacePath || latestRuns.find(run => run.runId === runId)?.repo || '';
   await copyRepoPath(event, repoPath);
 }
 async function copyTmuxRunCommand(event) {
@@ -811,67 +882,6 @@ async function renameRunLabel(event, runId = selectedRun) {
     if (selectedRun === runId) await refreshSelected();
     else await refreshRuns();
   });
-}
-async function maybeAutoAdvanceRunSummaries(runs) {
-  for (const run of runs || []) {
-    if (!run || run.runId === selectedRun) continue;
-    if (run.status !== 'batch_blocked') autoRetrySkippedRuns.delete(run.runId);
-    if (run.status === 'planned') await autoDispatchRun(run.runId, false);
-    else if (run.status === 'batches_completed') await autoJudgeRun(run.runId, false);
-    else if (run.status === 'batch_blocked') await autoRetryRun(run.runId, false);
-  }
-}
-async function autoDispatchRun(runId, refreshSelectedAfter = true) {
-  if (!runId || autoDispatchingRuns.has(runId)) return false;
-  autoDispatchingRuns.add(runId);
-  try {
-    await api(`/api/runs/${runId}/dispatch`, {method:'POST'});
-    if (refreshSelectedAfter && selectedRun === runId) await refreshSelected({auto:true, skipAutoAdvance:true});
-    return true;
-  } catch (error) {
-    console.error('自动派发失败', error);
-    return false;
-  } finally {
-    autoDispatchingRuns.delete(runId);
-  }
-}
-async function autoJudgeRun(runId, refreshSelectedAfter = true) {
-  if (!runId || autoJudgingRuns.has(runId)) return false;
-  autoJudgingRuns.add(runId);
-  try {
-    await api(`/api/runs/${runId}/judge`, {method:'POST'});
-    if (refreshSelectedAfter && selectedRun === runId) await refreshSelected({auto:true, skipAutoAdvance:true});
-    return true;
-  } catch (error) {
-    console.error('自动验收失败', error);
-    return false;
-  } finally {
-    autoJudgingRuns.delete(runId);
-  }
-}
-async function autoRetryRun(runId, refreshSelectedAfter = true) {
-  if (!runId || autoRetryingRuns.has(runId) || autoRetrySkippedRuns.has(runId)) return false;
-  autoRetryingRuns.add(runId);
-  try {
-    await api(`/api/runs/${runId}/retry`, {method:'POST', body: JSON.stringify({ reason: 'auto retry from dashboard', maxRetries: AUTO_MAX_RETRIES, auto: true })});
-    if (refreshSelectedAfter && selectedRun === runId) await refreshSelected({auto:true, skipAutoAdvance:true});
-    return true;
-  } catch (error) {
-    autoRetrySkippedRuns.add(runId);
-    console.error('自动重试失败', error);
-    return false;
-  } finally {
-    autoRetryingRuns.delete(runId);
-  }
-}
-async function maybeAutoAdvanceSelectedRun() {
-  const runId = selectedRun;
-  const state = currentState;
-  if (!runId || !state) return;
-  if (state.status !== 'batch_blocked') autoRetrySkippedRuns.delete(runId);
-  if (state.status === 'planned') await autoDispatchRun(runId);
-  else if (state.status === 'batches_completed' && state.judge?.status !== 'running' && state.judge?.status !== 'completed') await autoJudgeRun(runId);
-  else if (state.status === 'batch_blocked') await autoRetryRun(runId);
 }
 async function planRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/plan`, {method:'POST'}); await refreshSelected(); }); }
 async function dispatchRun() { if (selectedRun) await runAction(async () => { await api(`/api/runs/${selectedRun}/dispatch`, {method:'POST'}); await refreshSelected(); }); }

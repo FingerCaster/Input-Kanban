@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
-  DEFAULT_REPO, RUNS_DIR, ensureDir, nowIso, makeRunId, readJson,
+  DEFAULT_WORKSPACE, DEFAULT_REPO, RUNS_DIR, ensureDir, nowIso, makeRunId, readJson,
   writeJsonAtomic, fileInfo, readTextMaybe, extractFirstJsonObject, listRunDirs,
   pathForRun, roleDir, safeIdPart, RUNNER
 } from './utils.js';
@@ -31,6 +31,61 @@ function normalizeSandbox(value, fallback = 'workspace-write') {
 function statePath(runDir) { return path.join(runDir, 'run_state.json'); }
 function planPath(runDir) { return path.join(runDir, 'plan.json'); }
 function lockPath(runDir) { return path.join(runDir, RUN_STATE_LOCK_NAME); }
+function workspacePathOf(state) { return path.resolve(state?.workspacePath || state?.repo || DEFAULT_WORKSPACE || DEFAULT_REPO); }
+function workspaceNameOf(state) { return state?.workspaceName || path.basename(workspacePathOf(state)) || workspacePathOf(state); }
+async function detectWorkspaceMetadata(workspacePath) {
+  const resolvedWorkspace = path.resolve(workspacePath || DEFAULT_WORKSPACE || DEFAULT_REPO || process.cwd());
+  const metadata = {
+    path: resolvedWorkspace,
+    name: path.basename(resolvedWorkspace) || resolvedWorkspace,
+    isGit: false
+  };
+  try {
+    const { stdout: rootStdout } = await execFileAsync('git', ['-C', resolvedWorkspace, 'rev-parse', '--show-toplevel'], { timeout: 5000 });
+    const gitRoot = rootStdout.trim();
+    if (gitRoot) {
+      metadata.isGit = true;
+      metadata.gitRoot = gitRoot;
+      try {
+        const { stdout: branchStdout } = await execFileAsync('git', ['-C', resolvedWorkspace, 'branch', '--show-current'], { timeout: 5000 });
+        metadata.branch = branchStdout.trim() || 'detached';
+      } catch {
+        metadata.branch = 'unknown';
+      }
+      try {
+        const { stdout: dirtyStdout } = await execFileAsync('git', ['-C', resolvedWorkspace, 'status', '--porcelain'], { timeout: 5000 });
+        metadata.dirty = dirtyStdout.trim().length > 0;
+      } catch {
+        metadata.dirty = null;
+      }
+    }
+  } catch {}
+  return metadata;
+}
+async function assertWorkspacePath(workspace) {
+  const resolvedWorkspace = path.resolve(workspace || DEFAULT_WORKSPACE || DEFAULT_REPO || process.cwd());
+  let stat;
+  try { stat = await fsp.stat(resolvedWorkspace); }
+  catch { throw userInputError(`workspace does not exist: ${resolvedWorkspace}`); }
+  if (!stat.isDirectory()) throw userInputError(`workspace is not a directory: ${resolvedWorkspace}`);
+  return resolvedWorkspace;
+}
+function normalizeWorkspaceState(state) {
+  const workspacePath = path.resolve(state?.workspacePath || state?.repo || DEFAULT_WORKSPACE || DEFAULT_REPO);
+  const workspaceName = state.workspaceName || path.basename(workspacePath) || workspacePath;
+  const git = state.git || state.workspace?.git || null;
+  state.workspacePath = workspacePath;
+  state.workspaceName = workspaceName;
+  state.repo = state.repo || workspacePath;
+  state.git = git;
+  state.workspace = state.workspace || {
+    path: workspacePath,
+    name: workspaceName,
+    git
+  };
+  if (!state.workspace.git && git) state.workspace.git = git;
+  return state;
+}
 
 async function isStaleRunLock(lockFile) {
   const info = await fileInfo(lockFile);
@@ -165,28 +220,29 @@ function deriveRunLabel(label, taskText) {
   return truncateDisplayWidth(cleaned, MAX_DERIVED_LABEL_DISPLAY_WIDTH) || 'task';
 }
 
-async function assertGitWorkTree(repo) {
-  const resolvedRepo = path.resolve(repo || DEFAULT_REPO);
-  let stat;
-  try { stat = await fsp.stat(resolvedRepo); }
-  catch { throw userInputError(`target repository does not exist: ${resolvedRepo}`); }
-  if (!stat.isDirectory()) throw userInputError(`target repository is not a directory: ${resolvedRepo}`);
-  try {
-    const { stdout } = await execFileAsync('git', ['-C', resolvedRepo, 'rev-parse', '--is-inside-work-tree'], { timeout: 5000 });
-    if (stdout.trim() === 'true') return resolvedRepo;
-  } catch {}
-  throw userInputError(`target repository is not a git work tree: ${resolvedRepo}`);
-}
 
-export async function createRun({ label = '', taskText = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write' } = {}) {
-  const resolvedRepo = await assertGitWorkTree(repo);
+export async function createRun({ label = '', taskText = '', workspace = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write' } = {}) {
+  const resolvedWorkspace = await assertWorkspacePath(workspace || repo || DEFAULT_WORKSPACE);
+  const workspaceMeta = await detectWorkspaceMetadata(resolvedWorkspace);
   const runLabel = deriveRunLabel(label, taskText);
   const runId = makeRunId(runLabel);
   const runDir = pathForRun(runId);
   await ensureDir(runDir);
   await fsp.writeFile(path.join(runDir, 'task.md'), taskText || '');
   const state = {
-    runId, label: runLabel, repo: resolvedRepo, maxParallel: Number(maxParallel) || 3, workerSandbox: normalizeSandbox(workerSandbox),
+    runId,
+    label: runLabel,
+    workspacePath: resolvedWorkspace,
+    workspaceName: workspaceMeta.name,
+    workspace: {
+      path: resolvedWorkspace,
+      name: workspaceMeta.name,
+      git: workspaceMeta
+    },
+    git: workspaceMeta,
+    repo: resolvedWorkspace,
+    maxParallel: Number(maxParallel) || 3,
+    workerSandbox: normalizeSandbox(workerSandbox),
     runner: RUNNER,
     status: 'created', createdAt: nowIso(), updatedAt: nowIso(),
     planner: { status: 'pending' }, batches: [], tasks: [], judge: { status: 'pending' }
@@ -195,23 +251,57 @@ export async function createRun({ label = '', taskText = '', repo = DEFAULT_REPO
   return state;
 }
 
-export async function listRuns({ includeArchived = false } = {}) {
+function normalizeWorkspaceFilter(workspace) {
+  const value = String(workspace || '').trim();
+  if (!value || value === 'all') return '';
+  return path.resolve(value);
+}
+
+function runMatchesWorkspace(run, workspaceFilter) {
+  if (!workspaceFilter) return true;
+  const runWorkspace = path.resolve(run?.workspacePath || run?.repo || '');
+  return runWorkspace === workspaceFilter;
+}
+
+export function isTerminalRunStatus(status) {
+  return ['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(status);
+}
+
+export function isFailureRunStatus(status) {
+  return ['judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(status);
+}
+
+export async function listRuns({ includeArchived = false, workspace = '' } = {}) {
+  const workspaceFilter = normalizeWorkspaceFilter(workspace);
   const dirs = await listRunDirs();
   const rows = [];
   for (const dir of dirs) {
-    const s = await loadAndRefreshRun(path.basename(dir), null, { light: true });
-    if (s && (includeArchived || !s.archived)) rows.push(summaryOfRun(s));
+    const s = await loadRun(path.basename(dir));
+    if (!s || (!includeArchived && s.archived)) continue;
+    const summary = summaryOfRun(s);
+    if (!runMatchesWorkspace(summary, workspaceFilter)) continue;
+    rows.push(summary);
   }
   return rows;
 }
 
 export async function loadRun(runId) {
   const state = await readJson(statePath(pathForRun(runId)), null);
-  if (state) ensureBatchShape(state);
+  if (state) {
+    normalizeWorkspaceState(state);
+    if (!state.git || typeof state.git.isGit !== 'boolean') {
+      const workspaceMeta = await detectWorkspaceMetadata(workspacePathOf(state));
+      state.git = workspaceMeta;
+      state.workspace = state.workspace || { path: workspacePathOf(state), name: state.workspaceName, git: workspaceMeta };
+      state.workspace.git = workspaceMeta;
+    }
+    ensureBatchShape(state);
+  }
   return state;
 }
 
 async function saveRun(state) {
+  normalizeWorkspaceState(state);
   ensureBatchShape(state);
   state.updatedAt = nowIso();
   await writeJsonAtomic(statePath(pathForRun(state.runId)), state);
@@ -319,7 +409,7 @@ export async function startPlanner(runId) {
     await fsp.rm(planPath(runDir), { force: true });
     const taskText = await fsp.readFile(path.join(runDir, 'task.md'), 'utf8');
     const prompt = defaultPlannerPrompt(state, taskText);
-    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: state.repo, outDir });
+    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
     state.status = 'planning';
     state.planner = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir, attempt: (state.plannerAttempts?.length || 0) + 1 };
     await saveRun(state);
@@ -499,7 +589,7 @@ export async function dispatchRun(runId) {
 }
 
 function artifactPathForState(state, rel) {
-  return path.isAbsolute(rel) ? rel : path.join(state.repo, rel);
+  return path.isAbsolute(rel) ? rel : path.join(workspacePathOf(state), rel);
 }
 
 function workerArtifactInstructions(state, task) {
@@ -529,7 +619,7 @@ ORCHESTRATOR_BATCH_ID: ${task.batchId || 'batch-1'}
 
 ${task.prompt}${workerArtifactInstructions(state, task)}${upstreamArtifactInstructions(state, task)}
 `;
-  const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, batchId: task.batchId || 'batch-1', runStatePath: statePath(runDir), prompt: fullPrompt, sandbox: task.sandbox || state.workerSandbox || 'workspace-write', cwd: state.repo, outDir });
+  const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, batchId: task.batchId || 'batch-1', runStatePath: statePath(runDir), prompt: fullPrompt, sandbox: task.sandbox || state.workerSandbox || 'workspace-write', cwd: workspacePathOf(state), outDir });
   Object.assign(task, { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir });
 }
 
@@ -688,7 +778,7 @@ export async function startJudge(runId) {
     const judgeInput = await buildJudgeInput(state);
     await writeJsonAtomic(judgeInputPath, judgeInput);
     const prompt = defaultJudgePrompt(state, judgeInputPath);
-    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(pathForRun(runId)), prompt, sandbox: 'read-only', cwd: state.repo, outDir });
+    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(pathForRun(runId)), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
     state.judge = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir };
     state.status = 'judging';
     await saveRun(state);
@@ -709,6 +799,50 @@ export async function startJudge(runId) {
 
 export async function refreshRun(runId, appClient = null) {
   return await loadAndRefreshRun(runId, appClient, { light: false });
+}
+
+export async function autoAdvanceRun(runId, { appClient = null, startCreated = false, maxRetries = 1, retryReason = 'auto retry from scheduler' } = {}) {
+  let state = await refreshRun(runId, appClient);
+  if (!state || state.archived || state.status === 'stopped') return state;
+  if (startCreated && state.status === 'created') {
+    try { state = await startPlanner(runId); }
+    catch (error) { if (!/planner already running/i.test(error.message || '')) throw error; }
+    state = await refreshRun(runId, appClient);
+  }
+  if (!state || state.archived || state.status === 'stopped') return state;
+  if (state.status === 'batch_blocked') {
+    try { state = await retryRun(runId, { reason: retryReason, maxRetries, auto: true }); }
+    catch (error) { state.autoAdvanceError = error.message || String(error); }
+    return await refreshRun(runId, appClient) || state;
+  }
+  if (state.status === 'planned') {
+    try { state = await dispatchRun(runId); }
+    catch (error) { if (!/all batches completed|current batch is blocked/i.test(error.message || '')) throw error; }
+    return await refreshRun(runId, appClient) || state;
+  }
+  if (state.status === 'batches_completed' && state.judge?.status !== 'running' && state.judge?.status !== 'completed') {
+    try { state = await startJudge(runId); }
+    catch (error) { if (!/final judge is allowed only after all batches completed/i.test(error.message || '')) throw error; }
+    return await refreshRun(runId, appClient) || state;
+  }
+  return state;
+}
+
+export async function autoAdvanceActiveRuns({ appClient = null, startCreated = false, maxRetries = 1, retryReason = 'auto retry from scheduler' } = {}) {
+  const dirs = await listRunDirs();
+  const results = [];
+  for (const dir of dirs) {
+    const runId = path.basename(dir);
+    try {
+      const initial = await loadRun(runId);
+      if (!initial || initial.archived || ['judged', 'judge_failed', 'plan_failed', 'plan_empty', 'stopped'].includes(initial.status)) continue;
+      const state = await autoAdvanceRun(runId, { appClient, startCreated, maxRetries, retryReason });
+      if (state) results.push({ runId, status: state.status, ok: true });
+    } catch (error) {
+      results.push({ runId, ok: false, error: error.message || String(error) });
+    }
+  }
+  return results;
 }
 
 async function loadAndRefreshRun(runId, appClient = null, { light = false } = {}) {
@@ -796,7 +930,7 @@ async function refreshTask(state, task) {
   await attachTmuxMetadata(task, dir);
   delete task.attentionHint;
   task.artifacts = [];
-  for (const rel of task.expectedArtifacts || []) task.artifacts.push({ path: rel, ...(await fileInfo(path.isAbsolute(rel) ? rel : path.join(state.repo, rel))) });
+  for (const rel of task.expectedArtifacts || []) task.artifacts.push({ path: rel, ...(await fileInfo(path.isAbsolute(rel) ? rel : path.join(workspacePathOf(state), rel))) });
   const batch = (state.batches || []).find(b => b.id === task.batchId);
   if (batch) {
     const bt = batch.tasks.find(t => t.id === task.id);
@@ -1021,7 +1155,10 @@ async function buildJudgeInput(state) {
     run: {
       runId: state.runId,
       label: state.label,
-      repo: state.repo,
+      repo: workspacePathOf(state),
+      workspacePath: workspacePathOf(state),
+      workspaceName: state.workspaceName || path.basename(workspacePathOf(state)) || workspacePathOf(state),
+      git: state.git || state.workspace?.git || null,
       status: state.status,
       runner: state.runner || RUNNER,
       createdAt: state.createdAt,
@@ -1065,7 +1202,7 @@ function ensureBatchShape(state) {
 }
 
 async function enrichFromAppServer(state, appClient) {
-  const res = await appClient.listThreads({ cwd: state.repo, limit: 100 });
+  const res = await appClient.listThreads({ cwd: workspacePathOf(state), limit: 100 });
   const threads = res?.data || [];
   const all = [{ id: 'planner', target: state.planner }, ...(state.tasks || []).map(t => ({ id: t.id, target: t })), { id: 'judge', target: state.judge }];
   for (const item of all) {
@@ -1089,7 +1226,9 @@ function runDurationEndOfState(s) {
 
 export function summaryOfRun(s) {
   const tasks = s.tasks || [];
-  return { runId: s.runId, label: s.label, repo: s.repo, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
+  const workspacePath = s.workspacePath || s.repo || '';
+  const git = s.git || s.workspace?.git || null;
+  return { runId: s.runId, label: s.label, repo: s.repo || workspacePath, workspacePath, workspaceName: s.workspaceName || path.basename(workspacePath || ''), git, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
 }
 
 export async function readRunTaskText(runId) {

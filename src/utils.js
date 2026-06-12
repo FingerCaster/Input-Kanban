@@ -9,7 +9,8 @@ const { version: PACKAGE_VERSION } = require('../package.json');
 
 export const APP_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 export { PACKAGE_VERSION };
-export const DEFAULT_REPO = path.resolve(process.env.KANBAN_DEFAULT_REPO || process.cwd());
+export const DEFAULT_WORKSPACE = path.resolve(process.env.KANBAN_DEFAULT_WORKSPACE || process.env.KANBAN_DEFAULT_REPO || process.cwd());
+export const DEFAULT_REPO = DEFAULT_WORKSPACE;
 export const RUNS_DIR = path.resolve(process.env.KANBAN_RUNS_DIR || path.join(process.env.HOME || APP_ROOT, '.input-kanban', 'runs'));
 export const CODEX_BIN = process.env.KANBAN_CODEX_BIN || 'codex';
 export const VALID_RUNNERS = ['headless', 'tmux'];

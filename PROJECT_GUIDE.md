@@ -33,9 +33,9 @@ The intended use case is:
 
 ## Important Boundaries
 
-- If the current workspace is a multi-repo umbrella, the target repo must be a concrete child repository, not the umbrella root.
-- Workers can modify the target repository. Failed workers are not automatically retried because a partial modification may already exist.
-- The planner only creates a plan and does not modify the target repo. Planner failures, invalid output, and empty plans can be safely retried before any worker or judge starts.
+- If the current workspace is a multi-repo umbrella, the target workspace must be a concrete child directory, not the umbrella root.
+- Workers can modify the target workspace. Failed workers are not automatically retried because a partial modification may already exist.
+- The planner only creates a plan and does not modify the target workspace. Planner failures, invalid output, and empty plans can be safely retried before any worker or judge starts.
 - Local process state, `exit_code`, logs, and artifacts are the source of truth. Codex App Server session lookup is auxiliary.
 - tmux mode changes terminal visibility only. Node.js still owns scheduling, batch barriers, `maxParallel`, stop/archive, `judge_input.json`, and status refresh from `exit_code` plus artifacts.
 - tmux windows stay open after command completion for human inspection, but `exit_code` is written before the keep-open shell starts so state can advance without closing the window.
@@ -58,6 +58,7 @@ Supported serve options:
 ```text
 --host <host>
 --port <port>
+--workspace <path>
 --repo <path>
 --runs-dir <path>
 --codex-bin <path>
@@ -113,6 +114,7 @@ Supported stop options:
 Supported submit options:
 
 ```text
+--workspace <path>
 --repo <path>
 --label <label>
 --task <text>
@@ -128,11 +130,11 @@ Supported submit options:
 --poll-ms <ms>
 ```
 
-`input-kanban submit` creates a run and starts the planner. Task content can come from `--task <text>` or `--task-file <path|->`; omitting `--repo` uses the current working directory as the target Git work tree. Omitting `--label` derives the run label from the first non-empty task line. Auto mode is the default for submit: it keeps polling the run, dispatches batches when the plan is ready, and starts the final judge once all batches complete. `--no-auto` keeps submit to create + plan only. `-d` / `--detach` starts a background supervisor process for the auto loop and lets the submitting terminal return immediately. The submit output includes `input-kanban status <runId> --watch` for terminal-side observation. Because it writes to the same runs directory as the Web server, CLI-created runs are visible in the 8787 dashboard when both processes use the same `--runs-dir`.
+`input-kanban submit` creates a run and starts the planner. Task content can come from `--task <text>` or `--task-file <path|->`; omitting `--workspace` uses the current working directory as the target workspace, and `--repo` remains a compatibility alias. Omitting `--label` derives the run label from the first non-empty task line. Auto mode is the default for submit: it keeps polling the run through the shared orchestrator auto-advance path, dispatches batches when the plan is ready, and starts the final judge once all batches complete. `--no-auto` keeps submit to create + plan only. `-d` / `--detach` starts a background supervisor process for the same auto loop and lets the submitting terminal return immediately. The Web server also starts a lightweight scheduler that uses this shared path, so serial batch advancement does not depend on an open browser tab. The submit output includes `input-kanban status <runId> --watch` for terminal-side observation. Because it writes to the same runs directory as the Web server, CLI-created runs are visible in the 8787 dashboard when both processes use the same `--runs-dir`.
 
 Default behavior:
 
-- default repo: current working directory when `input-kanban` is launched; run creation validates that the selected repo is inside a Git work tree;
+- default workspace: current working directory when `input-kanban` is launched; run creation only validates that the selected directory exists and is a directory; Git is detected and labeled when available;
 - default host: `127.0.0.1`;
 - default port: `8787`;
 - default runs directory: `~/.input-kanban/runs`;
@@ -308,7 +310,7 @@ Risk notes:
 
 - A stale-lock timeout that is too short can accidentally steal a lock from a slow or paused process; too long slows recovery.
 - `child.onExit` callbacks must continue to take the write lock.
-- If the repository ever moves to shared network storage, the current single-machine exclusive-file assumptions should be re-evaluated.
+- If the workspace ever moves to shared network storage, the current single-machine exclusive-file assumptions should be re-evaluated.
 
 ## Stop and Archive
 
@@ -500,13 +502,13 @@ change. Record the exact commands, run ids, and artifact paths in the release
 notes or handoff.
 
 1. Headless runner:
-   - Start the app with `input-kanban --runner headless --runs-dir <tmp-runs-dir> --repo <target-repo> --port <free-port>`.
+   - Start the app with `input-kanban --runner headless --runs-dir <tmp-runs-dir> --workspace <target-workspace> --port <free-port>`.
    - Create a small run, plan it, dispatch at least one worker, and run the final judge if the plan requires it.
    - Verify the run state reports `runner: headless`, no task exposes `tmux` metadata, and role directories contain the expected `prompt.md`, `events.jsonl`, `events_timed.jsonl`, `stderr.log`, `last_message.md`, and `exit_code` files.
    - Stop the run and verify no unrelated local process is affected.
 
 2. tmux runner, only when `tmux -V` succeeds:
-   - Start the app with `input-kanban --runner tmux --runs-dir <tmp-runs-dir> --repo <target-repo> --port <free-port>`.
+   - Start the app with `input-kanban --runner tmux --runs-dir <tmp-runs-dir> --workspace <target-workspace> --port <free-port>`.
    - Create a small run and click Plan. Verify a session named `input-kanban-<runId>` exists and has a planner window.
    - Dispatch workers. Verify each batch gets its own window with an overview pane plus worker panes, and each role directory writes `run.sh` and `tmux.json` with the expected `sessionName`, `windowName`, `target`, and `attachCommand`.
    - Verify `run.sh` writes `exit_code` before printing the keep-open summary, then keeps the window open for manual inspection.
@@ -527,7 +529,7 @@ Keep a single repository-level `RELEASE_NOTES.md` with recent version history. D
 ## Change Guidelines
 
 - Do not add automatic worker retry unless there is a verified rollback or idempotency mechanism.
-- Do not default to `--skip-git-repo-check`; prefer a concrete target child repository.
+- Do not default to bypassing workspace validation; prefer a concrete target child workspace.
 - Preserve batch barriers when modifying scheduling logic.
 - Decide clearly between soft archive and physical directory archive before changing archive semantics.
 - Keep the frontend buildless unless there is a strong reason to introduce a build pipeline.

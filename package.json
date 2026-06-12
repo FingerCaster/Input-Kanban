@@ -1,13 +1,13 @@
 {
   "name": "input-kanban",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "type": "module",
   "bin": {
     "input-kanban": "bin/input-kanban.js"
   },
   "scripts": {
     "start": "node bin/input-kanban.js",
-    "check": "node --check bin/input-kanban.js && node --check bin/input-kanban-format-events.js && node --check bin/input-kanban-timestamp-events.js && node --check bin/input-kanban-tmux-overview.js && node --check src/server.js && node --check src/orchestrator.js && node --check src/appServerClient.js && node --check src/utils.js && node --check src/eventFormatter.js && node --check src/runners/index.js && node --check src/runners/headlessRunner.js && node --check src/runners/tmuxRunner.js && node --check src/runners/tmuxUtils.js && node --check src/tmux.js && node --test"
+    "check": "node --check bin/input-kanban.js && node --check bin/input-kanban-format-events.js && node --check bin/input-kanban-timestamp-events.js && node --check bin/input-kanban-tmux-overview.js && node --check src/server.js && node --check src/scheduler.js && node --check src/orchestrator.js && node --check src/appServerClient.js && node --check src/utils.js && node --check src/eventFormatter.js && node --check src/runners/index.js && node --check src/runners/headlessRunner.js && node --check src/runners/tmuxRunner.js && node --check src/runners/tmuxUtils.js && node --check src/tmux.js && node --test"
   },
   "description": "A local Codex orchestration kanban dashboard",
   "license": "MIT",

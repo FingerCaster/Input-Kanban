@@ -43,7 +43,7 @@ function splitCommand(argv) {
 }
 
 function parseServeArgs(argv) {
-  const args = { host: '127.0.0.1', port: undefined, repo: undefined, runsDir: undefined, codexBin: undefined, runner: undefined, open: false, json: false, help: false };
+  const args = { host: '127.0.0.1', port: undefined, workspace: undefined, repo: undefined, runsDir: undefined, codexBin: undefined, runner: undefined, open: false, json: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
@@ -53,6 +53,7 @@ function parseServeArgs(argv) {
     else if (arg === '--no-open') args.open = false;
     else if (arg === '--host') args.host = next();
     else if (arg === '--port' || arg === '-p') args.port = Number(next());
+    else if (arg === '--workspace') args.workspace = next();
     else if (arg === '--repo' || arg === '-r') args.repo = next();
     else if (arg === '--runs-dir') args.runsDir = next();
     else if (arg === '--codex-bin') args.codexBin = next();
@@ -63,13 +64,15 @@ function parseServeArgs(argv) {
 }
 
 function parseRunsArgs(argv) {
-  const args = { runsDir: undefined, active: false, includeArchived: false, limit: 20, json: false, help: false };
+  const args = { runsDir: undefined, workspace: undefined, repo: undefined, active: false, includeArchived: false, limit: 20, json: false, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
     if (arg === '--help' || arg === '-h') args.help = true;
     else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--runs-dir') args.runsDir = next();
+    else if (arg === '--workspace') args.workspace = next();
+    else if (arg === '--repo' || arg === '-r') args.repo = next();
     else if (arg === '--active') args.active = true;
     else if (arg === '--include-archived') args.includeArchived = true;
     else if (arg === '--limit') args.limit = Number(next());
@@ -144,7 +147,7 @@ function parseStopArgs(argv) {
 }
 
 function parseAutoArgs(argv) {
-  const args = { host: '127.0.0.1', port: 8787, runsDir: undefined, codexBin: undefined, runner: undefined, runId: undefined, json: false, pollMs: 3000, maxRetries: 1, help: false };
+  const args = { host: '127.0.0.1', port: 8787, workspace: undefined, runsDir: undefined, codexBin: undefined, runner: undefined, runId: undefined, json: false, pollMs: 3000, maxRetries: 1, help: false };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
@@ -152,6 +155,7 @@ function parseAutoArgs(argv) {
     else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--host') args.host = next();
     else if (arg === '--port' || arg === '-p') args.port = Number(next());
+    else if (arg === '--workspace') args.workspace = next();
     else if (arg === '--runs-dir') args.runsDir = next();
     else if (arg === '--codex-bin') args.codexBin = next();
     else if (arg === '--runner') args.runner = validateRunner(next(), '--runner');
@@ -165,7 +169,7 @@ function parseAutoArgs(argv) {
 
 function parseSubmitArgs(argv) {
   const args = {
-    host: '127.0.0.1', port: 8787, repo: undefined, runsDir: undefined, codexBin: undefined,
+    host: '127.0.0.1', port: 8787, workspace: undefined, repo: undefined, runsDir: undefined, codexBin: undefined,
     runner: undefined, label: undefined, taskText: undefined, taskFile: undefined, maxParallel: 3,
     workerSandbox: 'workspace-write', auto: true, detach: false, watch: true, json: false, pollMs: 3000, maxRetries: 1, help: false
   };
@@ -176,6 +180,7 @@ function parseSubmitArgs(argv) {
     else if (arg === '--json' || arg === '-j') args.json = true;
     else if (arg === '--host') args.host = next();
     else if (arg === '--port' || arg === '-p') args.port = Number(next());
+    else if (arg === '--workspace') args.workspace = next();
     else if (arg === '--repo' || arg === '-r') args.repo = next();
     else if (arg === '--runs-dir') args.runsDir = next();
     else if (arg === '--codex-bin') args.codexBin = next();
@@ -199,8 +204,15 @@ function parseSubmitArgs(argv) {
 function applyRuntimeEnv(args) {
   if (args.port) process.env.PORT = String(args.port);
   if (args.host) process.env.HOST = args.host;
-  if (args.repo) process.env.KANBAN_DEFAULT_REPO = path.resolve(args.repo);
-  else if (!process.env.KANBAN_DEFAULT_REPO) process.env.KANBAN_DEFAULT_REPO = process.cwd();
+  const workspace = args.workspace || args.repo;
+  if (workspace) {
+    const resolvedWorkspace = path.resolve(workspace);
+    process.env.KANBAN_DEFAULT_WORKSPACE = resolvedWorkspace;
+    process.env.KANBAN_DEFAULT_REPO = resolvedWorkspace;
+  } else {
+    if (!process.env.KANBAN_DEFAULT_WORKSPACE) process.env.KANBAN_DEFAULT_WORKSPACE = process.env.KANBAN_DEFAULT_REPO || process.cwd();
+    if (!process.env.KANBAN_DEFAULT_REPO) process.env.KANBAN_DEFAULT_REPO = process.env.KANBAN_DEFAULT_WORKSPACE || process.cwd();
+  }
   if (args.runsDir) process.env.KANBAN_RUNS_DIR = path.resolve(args.runsDir);
   if (args.codexBin) process.env.KANBAN_CODEX_BIN = args.codexBin;
   if (args.runner) process.env.KANBAN_RUNNER = args.runner;
@@ -231,7 +243,8 @@ Usage:
 Serve options:
   --host <host>              Host to bind, default 127.0.0.1
   -p, --port <port>          Port to bind, default 8787
-  -r, --repo <path>          Default target repository, default current directory
+  --workspace <path>         Default workspace, default current directory
+  -r, --repo <path>          Alias for --workspace
   --runs-dir <path>          Runtime runs directory, default ~/.input-kanban/runs
   --codex-bin <path>         Codex CLI executable, default codex
   --runner <mode>            Runner mode: headless or tmux, default headless
@@ -270,7 +283,8 @@ Stop options:
   -j, --json                 Emit JSON output instead of human text
 
 Submit options:
-  -r, --repo <path>          Target Git work tree, default current directory
+  --workspace <path>         Target workspace, default current directory
+  -r, --repo <path>          Alias for --workspace
   -l, --label <label>        Task batch name, default generated from task text
   --task <text>              Task description text
   --task-file <path>         Read task description from file, use - for stdin
@@ -292,12 +306,13 @@ function printSubmitHelp() {
   console.log(`input-kanban submit
 
 Usage:
-  input-kanban submit --repo <path> --task-file task.md
-  input-kanban submit --repo <path> --task "fix the bug" --label "bugfix"
+  input-kanban submit --workspace <path> --task-file task.md
+  input-kanban submit --workspace <path> --task "fix the bug" --label "bugfix"
   input-kanban submit --task-file task.md -d
 
 Options:
-  -r, --repo <path>          Target Git work tree, default current directory
+  --workspace <path>         Target workspace, default current directory
+  -r, --repo <path>          Alias for --workspace
   -l, --label <label>        Task batch name, default generated from task text
   --task <text>              Task description text
   --task-file <path>         Read task description from file, use - for stdin
@@ -318,11 +333,14 @@ function printRunsHelp() {
 
 Usage:
   input-kanban runs
+  input-kanban runs --workspace <path>
   input-kanban runs --active
   input-kanban --json runs --active
 
 Options:
   --runs-dir <path>          Runtime runs directory shared with the Web UI
+  --workspace <path>         Filter by workspace path
+  -r, --repo <path>          Alias for --workspace
   --active                   Show only active or pending-action runs
   --include-archived         Include archived runs
   --limit <n>                Maximum rows to print, default 20
@@ -467,7 +485,7 @@ function printRunStatus(state) {
   console.log(`任务批次: ${state.label || '-'}`);
   console.log(`Run ID: ${state.runId}`);
   console.log(`状态: ${displayStatus(state.status)}`);
-  console.log(`仓库: ${state.repo || '-'}`);
+  console.log(`工作区: ${state.workspacePath || state.repo || '-'}`);
   console.log(`当前批次: ${currentBatchText(state)}`);
   console.log(`进度: ${counts.completed}/${counts.total} ｜执行中 ${counts.running} ｜失败 ${counts.failed}`);
   if (state.judge?.status && state.judge.status !== 'pending') console.log(`验收: ${displayStatus(state.judge.status)}`);
@@ -476,7 +494,7 @@ function printRunStatus(state) {
 function printRunsTable(runs) {
   if (!runs.length) { console.log('没有找到任务批次'); return; }
   for (const run of runs) {
-    console.log(`${run.runId}｜${run.label || '-'}｜${displayStatus(run.status)}｜进度 ${run.completed}/${run.total}｜执行中 ${run.running}｜失败 ${run.failed}｜runner ${run.runner || '-'}｜沙箱 ${run.workerSandbox || '-'}｜仓库 ${run.repo || '-'}`);
+    console.log(`${run.runId}｜${run.label || '-'}｜${displayStatus(run.status)}｜进度 ${run.completed}/${run.total}｜执行中 ${run.running}｜失败 ${run.failed}｜runner ${run.runner || '-'}｜沙箱 ${run.workerSandbox || '-'}｜工作区 ${run.workspacePath || run.repo || '-'}`);
   }
 }
 
@@ -510,36 +528,17 @@ async function confirmFailureTerminal(runId, state, refreshRun, pollMs) {
 }
 
 async function watchRun(runId, { auto = false, pollMs = 3000, quiet = false, maxRetries = 1 } = {}) {
-  const { dispatchRun, refreshRun, retryRun, startJudge } = await import('../src/orchestrator.js');
+  const { autoAdvanceRun, refreshRun } = await import('../src/orchestrator.js');
   let lastStatus = '';
-  let judgeStarted = false;
   while (true) {
-    const state = await refreshRun(runId);
+    const state = auto
+      ? await autoAdvanceRun(runId, { startCreated: true, maxRetries, retryReason: 'auto retry from CLI' })
+      : await refreshRun(runId);
     if (!state) throw new Error(`run not found: ${runId}`);
     const line = statusLine(state);
     if (line !== lastStatus) {
       if (!quiet) console.log(`[${new Date().toLocaleTimeString()}] ${line}`);
       lastStatus = line;
-    }
-
-    if (auto && state.status === 'batch_blocked') {
-      try {
-        const retryState = await retryRun(runId, { reason: 'auto retry from CLI', maxRetries, auto: true });
-        if (!quiet) console.log(`自动重试任务: ${retryState.retriedTaskIds?.join(', ') || '-'}`);
-        lastStatus = '';
-        continue;
-      } catch (error) {
-        if (!quiet) console.log(`自动重试跳过: ${error.message || String(error)}`);
-      }
-    }
-
-    if (auto && state.status === 'planned') {
-      if (!quiet) console.log('自动派发任务...');
-      await dispatchRun(runId);
-    } else if (auto && state.status === 'batches_completed' && state.judge?.status !== 'running' && !judgeStarted) {
-      if (!quiet) console.log('自动发起最终验收...');
-      judgeStarted = true;
-      await startJudge(runId);
     }
 
     if (isTerminal(state)) {
@@ -562,13 +561,15 @@ async function serve(args) {
   const { startServer } = await import('../src/server.js');
   const instance = await startServer({ host: process.env.HOST, port: Number(process.env.PORT || 8787), log: false });
   if (args.json) {
-    printJson({ ok: true, command: 'serve', version: instance.version, url: instance.url, repo: instance.defaultRepo, runsDir: instance.runsDir, runner: instance.runner });
+    printJson({ ok: true, command: 'serve', version: instance.version, url: instance.url, defaultWorkspace: instance.defaultWorkspace, defaultRepo: instance.defaultRepo, runsDir: instance.runsDir, runner: instance.runner, scheduler: instance.scheduler });
   } else {
     console.log(`Input Kanban v${PACKAGE_VERSION} started`);
     console.log(`URL:  ${instance.url}`);
-    console.log(`Repo: ${instance.defaultRepo}`);
+    console.log(`Workspace: ${instance.defaultWorkspace}`);
+    console.log(`Repo alias: ${instance.defaultRepo}`);
     console.log(`Runs: ${instance.runsDir}`);
     console.log(`Runner: ${instance.runner}`);
+    console.log(`Scheduler: ${instance.scheduler ? 'enabled' : 'disabled'}`);
   }
   if (args.open) openBrowser(instance.url);
   const shutdown = () => { instance.stop().finally(() => process.exit(0)); };
@@ -606,10 +607,11 @@ async function runs(args) {
   applyRuntimeEnv(args);
   const { listRuns } = await import('../src/orchestrator.js');
   const limit = Number.isFinite(Number(args.limit)) && Number(args.limit) > 0 ? Number(args.limit) : 20;
-  const allRuns = await listRuns({ includeArchived: !!args.includeArchived });
+  const workspace = args.workspace || args.repo || '';
+  const allRuns = await listRuns({ includeArchived: !!args.includeArchived, workspace });
   const filtered = (args.active ? allRuns.filter(isActiveRunSummary) : allRuns).slice(0, limit);
   if (args.json) {
-    printJson({ ok: true, command: 'runs', active: !!args.active, includeArchived: !!args.includeArchived, limit, count: filtered.length, runs: filtered });
+    printJson({ ok: true, command: 'runs', active: !!args.active, includeArchived: !!args.includeArchived, workspace: workspace || undefined, limit, count: filtered.length, runs: filtered });
     return;
   }
   printRunsTable(filtered);
@@ -730,6 +732,7 @@ async function submit(args) {
   const state = await createRun({
     label: args.label,
     taskText,
+    workspace: process.env.KANBAN_DEFAULT_WORKSPACE || process.env.KANBAN_DEFAULT_REPO,
     repo: process.env.KANBAN_DEFAULT_REPO,
     maxParallel: args.maxParallel,
     workerSandbox: args.workerSandbox

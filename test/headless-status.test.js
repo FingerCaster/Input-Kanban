@@ -5,10 +5,13 @@ import os from 'node:os';
 import path from 'node:path';
 
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-headless-status-'));
+const codexStub = path.join(tmp, 'codex-stub.js');
+await fsp.writeFile(codexStub, '#!/usr/bin/env node\nsetTimeout(() => process.exit(0), 10000);\n');
+await fsp.chmod(codexStub, 0o755);
 process.env.KANBAN_RUNS_DIR = tmp;
 process.env.KANBAN_RUNNER = 'headless';
-process.env.KANBAN_CODEX_BIN = 'node';
-const { refreshRun } = await import(`../src/orchestrator.js?headless-status=${Date.now()}`);
+process.env.KANBAN_CODEX_BIN = codexStub;
+const { refreshRun, autoAdvanceRun, stopRun } = await import(`../src/orchestrator.js?headless-status=${Date.now()}`);
 
 async function writeRunState({ runId, startedAt, status = 'completed' }) {
   const runDir = path.join(tmp, runId);
@@ -59,4 +62,39 @@ test('headless task without tmux metadata does not get manual attention hint', a
 
   const state = await refreshRun('run_headless_attention');
   assert.equal(state.tasks[0].attentionHint, undefined);
+});
+
+test('autoAdvanceRun dispatches planned runs through the shared orchestrator path', async () => {
+  const runId = 'run_auto_advance_planned';
+  const runDir = path.join(tmp, runId);
+  await fsp.mkdir(path.join(runDir, 'planner'), { recursive: true });
+  await fsp.mkdir(path.join(runDir, 'judge'), { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'task.md'), 'task');
+  await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
+    runId,
+    label: 'auto advance planned',
+    repo: tmp,
+    runner: 'headless',
+    maxParallel: 1,
+    workerSandbox: 'workspace-write',
+    status: 'planned',
+    createdAt: '2026-06-08T00:00:00.000Z',
+    updatedAt: '2026-06-08T00:00:00.000Z',
+    planner: { status: 'completed' },
+    judge: { status: 'pending' },
+    batches: [{
+      id: 'batch-1',
+      status: 'pending',
+      maxParallel: 1,
+      tasks: [{ id: 'T-01', name: 'Worker', batchId: 'batch-1', prompt: 'work', sandbox: 'workspace-write', expectedArtifacts: [], status: 'pending' }]
+    }],
+    tasks: [{ id: 'T-01', name: 'Worker', batchId: 'batch-1', prompt: 'work', sandbox: 'workspace-write', expectedArtifacts: [], status: 'pending' }]
+  }, null, 2));
+
+  const state = await autoAdvanceRun(runId);
+  assert.equal(state.status, 'running');
+  assert.equal(state.tasks[0].status, 'running');
+  assert.ok(state.tasks[0].startedAt);
+  assert.ok(state.tasks[0].pid > 0);
+  await stopRun(runId, { reason: 'test cleanup' });
 });

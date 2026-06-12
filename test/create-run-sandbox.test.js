@@ -43,16 +43,26 @@ test('createRun rejects unknown worker sandbox by falling back to workspace-writ
   assert.equal(state.workerSandbox, 'workspace-write');
 });
 
-test('createRun rejects a target directory outside a git work tree', async () => {
-  await assert.rejects(
-    () => createRun({ label: 'not git', repo: nonGitRepo, taskText: 'noop' }),
-    error => error.statusCode === 400 && /not a git work tree/.test(error.message)
-  );
+test('createRun accepts a non-git workspace directory', async () => {
+  const state = await createRun({ label: 'not git', workspace: nonGitRepo, taskText: 'noop' });
+  assert.equal(state.workspacePath, nonGitRepo);
+  assert.equal(state.repo, nonGitRepo);
+  assert.equal(state.git.isGit, false);
+  assert.equal(state.workspace.git.isGit, false);
 });
 
-test('createRun rejects a missing target repository path', async () => {
+test('createRun marks a git workspace when available', async () => {
+  const state = await createRun({ label: 'git workspace', repo, taskText: 'noop' });
+  assert.equal(state.workspacePath, repo);
+  assert.equal(state.repo, repo);
+  assert.equal(state.git.isGit, true);
+  assert.equal(state.workspace.git.isGit, true);
+  assert.ok(state.git.gitRoot);
+});
+
+test('createRun rejects a missing workspace path', async () => {
   await assert.rejects(
-    () => createRun({ label: 'missing', repo: path.join(tmp, 'missing'), taskText: 'noop' }),
+    () => createRun({ label: 'missing', workspace: path.join(tmp, 'missing'), taskText: 'noop' }),
     error => error.statusCode === 400 && /does not exist/.test(error.message)
   );
 });

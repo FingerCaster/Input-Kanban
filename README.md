@@ -2,7 +2,7 @@
 
 中文 | [English](README.en.md)
 
-Input Kanban 是一个本地 Codex 编排看板。推荐通过 npm 安装，然后在目标代码仓库里运行 `input-kanban`，用浏览器管理任务拆分、并发执行和最终验收。
+Input Kanban 是一个本地 Codex 编排看板。推荐通过 npm 安装，然后在目标工作区里运行 `input-kanban`，用浏览器管理任务拆分、并发执行和最终验收；如果工作区恰好是 Git 仓库，界面会额外标识出来。
 
 ## 推荐使用方式
 
@@ -18,12 +18,12 @@ npm install -g input-kanban
 input-kanban --help
 ```
 
-### 2. 在目标仓库启动
+### 2. 在目标工作区启动
 
-进入你希望 Codex 修改或检查的代码仓库：
+进入你希望 Codex 修改或检查的工作区：
 
 ```bash
-cd /path/to/your/repo
+cd /path/to/your/workspace
 input-kanban
 ```
 
@@ -35,13 +35,15 @@ http://127.0.0.1:8787
 
 打开浏览器访问这个地址即可使用看板。
 
-### 3. 指定目标仓库启动
+### 3. 指定目标工作区启动
 
-如果不想先 `cd` 到目标仓库，也可以显式指定：
+如果不想先 `cd` 到目标工作区，也可以显式指定：
 
 ```bash
-input-kanban --repo /path/to/your/repo
+input-kanban --workspace /path/to/your/workspace
 ```
+
+`--repo` 仍可作为兼容别名使用。
 
 ## CLI 自动执行
 
@@ -52,7 +54,9 @@ input-kanban submit --task-file task.md --label "修复登录问题"
 input-kanban submit --task "修复登录问题，并补充回归测试" --label "修复登录问题"
 ```
 
-`submit` 默认会创建任务批次、发起拆分、自动派发所有批次，并在全部完成后自动发起最终验收。默认 repo 是当前目录；如果不传 `--label`，任务批次名称会从任务内容自动生成。它使用同一个 runs 目录，所以只要 8787 Web 看板也使用相同的 `--runs-dir`，CLI 创建的任务会在 Web 界面里可见。
+`submit` 默认会创建任务批次、发起拆分、自动派发所有批次，并在全部完成后自动发起最终验收。默认 workspace 是当前目录；如果不传 `--label`，任务批次名称会从任务内容自动生成。它使用同一个 runs 目录，所以只要 8787 Web 看板也使用相同的 `--runs-dir`，CLI 创建的任务会在 Web 界面里可见。
+
+`input-kanban serve` 会启动一个轻量后台 scheduler，持续刷新并推进未完成的 run：plan ready 后派发 batch、串行 batch 完成后启动下一批、全部 batch 完成后启动 final judge。CLI `submit --auto` / `input-kanban auto <runId>` 与 Web server 共用同一套 orchestrator 自动推进逻辑，因此任务推进不再依赖浏览器页面是否打开或刷新。
 
 如果希望提交后立即返回，让任务在后台自动执行，可以加 `-d` / `--detach`：
 
@@ -87,7 +91,7 @@ input-kanban --json retry <runId> [taskId]
 input-kanban stop <runId>
 ```
 
-`runs` 用来先列出可见任务批次，`runs --active` 只列出未进入终态或仍有子任务运行的批次，便于 agent 先发现 `runId`，再用 `status <runId>` 查详情。不传 `runId` 时，`status` 和 `result` 默认查看最近一次任务批次。`result --copy` 会复制最终验收结果；`retry` 会保留失败现场并重试失败/未知任务；`--json` 适合给 agent/脚本做结构化读取；停止任务请显式传入 `runId`，避免误停。
+`runs` 用来先列出可见任务批次，`runs --active` 只列出未进入终态或仍有子任务运行的批次，便于 agent 先发现 `runId`，再用 `status <runId>` 查详情。要只看某个工作区，可用 `input-kanban runs --workspace /path/to/workspace`；Web 左栏也提供了工作区筛选。不传 `runId` 时，`status` 和 `result` 默认查看最近一次任务批次。`result --copy` 会复制最终验收结果；`retry` 会保留失败现场并重试失败/未知任务；`--json` 适合给 agent/脚本做结构化读取；停止任务请显式传入 `runId`，避免误停。
 
 ## 常用启动参数
 
@@ -102,7 +106,7 @@ input-kanban --open
 
 默认值：
 
-- 目标仓库：启动 `input-kanban` 时的当前目录；创建批次时会校验它必须位于 Git work tree 内
+- 工作区：启动 `input-kanban` 时的当前目录；创建批次时只要求它是一个存在的目录，若检测到 Git 会额外显示 Git 标识
 - host：`127.0.0.1`
 - port：`8787`
 - runs 目录：`~/.input-kanban/runs`
@@ -113,14 +117,14 @@ input-kanban --open
 
 tmux 模式仍由 Node.js 负责 batch barrier、`maxParallel`、final judge 顺序和 `judge_input.json` 生成。每个角色输出目录会写入 `run.sh` 和 `tmux.json`，状态继续由 `events.jsonl`、`stderr.log`、`last_message.md`、`exit_code` 和既有 artifact 文件驱动。tmux 角色命令完成后会先写入 `exit_code`，再保留 window，方便查看现场；需要关闭时由用户在 tmux 里手动退出。
 
-tmux 模式是可选能力，主要用于在终端里实时查看每个 Codex 角色的执行过程。`codex exec` 当前属于非交互模式，默认不会弹出人工 approval；如果创建任务时选择 `danger-full-access`，表示显式放开 worker sandbox 限制，应只在受控测试仓库中使用。
+tmux 模式是可选能力，主要用于在终端里实时查看每个 Codex 角色的执行过程。`codex exec` 当前属于非交互模式，默认不会弹出人工 approval；如果创建任务时选择 `danger-full-access`，表示显式放开 worker sandbox 限制，应只在受控测试工作区中使用。
 
 看板会在 run 生成 tmux 元数据后显示 `复制tmux attach指令`。文件查看区域不再重复展示 tmux 终端信息；如需查看现场，请从批次详情顶部复制 attach 指令进入 tmux session。
 
 ## 在看板里如何使用
 
 1. 点击 `新建任务批次`。
-2. 输入批次名称、目标仓库、Worker 沙箱和任务说明。
+2. 输入批次名称、工作区、Worker 沙箱和任务说明。
 3. 点击 `创建批次`。
 4. 看板会自动发起 `拆分任务`，让 Codex planner 生成 batches 和 workers。
 5. 拆分完成后，Web 默认自动派发执行，按 batch barrier 和并发限制运行 workers。
@@ -159,7 +163,7 @@ runs/<runId>/
     └── verdict.json
 ```
 
-这些文件是本地运行记录，不需要提交到你的业务仓库。
+这些文件是本地运行记录，不需要提交到你的业务工作区。
 
 ## 使用前提
 

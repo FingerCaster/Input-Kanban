@@ -3,8 +3,9 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CodexAppServerClient } from './appServerClient.js';
-import { APP_ROOT, DEFAULT_REPO, PACKAGE_VERSION, RUNNER, RUNS_DIR } from './utils.js';
+import { APP_ROOT, DEFAULT_WORKSPACE, DEFAULT_REPO, PACKAGE_VERSION, RUNNER, RUNS_DIR } from './utils.js';
 import { createRun, listRuns, startPlanner, dispatchRun, startJudge, refreshRun, readRunFile, readRunTaskText, markTaskCompleted, stopRun, archiveRun, renameRun, retryRun } from './orchestrator.js';
+import { startAutoScheduler } from './scheduler.js';
 
 const PUBLIC_DIR = path.join(APP_ROOT, 'public');
 
@@ -42,10 +43,10 @@ async function handleApi(req, res, url, appClient) {
   const parts = url.pathname.split('/').filter(Boolean);
   try {
     if (req.method === 'GET' && url.pathname === '/api/health') {
-      return send(res, 200, { ok: true, version: PACKAGE_VERSION, appRoot: APP_ROOT, runsDir: RUNS_DIR, defaultRepo: DEFAULT_REPO, runner: RUNNER });
+      return send(res, 200, { ok: true, version: PACKAGE_VERSION, appRoot: APP_ROOT, runsDir: RUNS_DIR, defaultWorkspace: DEFAULT_WORKSPACE, defaultRepo: DEFAULT_REPO, runner: RUNNER });
     }
     if (parts[1] === 'runs' && parts.length === 2) {
-      if (req.method === 'GET') return send(res, 200, { runs: await listRuns({ includeArchived: url.searchParams.get('includeArchived') === '1' }) });
+      if (req.method === 'GET') return send(res, 200, { runs: await listRuns({ includeArchived: url.searchParams.get('includeArchived') === '1', workspace: url.searchParams.get('workspace') || '' }) });
       if (req.method === 'POST') {
         const body = await readBody(req);
         return send(res, 201, await createRun(body));
@@ -98,17 +99,19 @@ export function createHttpServer({ appClient = new CodexAppServerClient() } = {}
   });
 }
 
-export async function startServer({ host = process.env.HOST || '127.0.0.1', port = Number(process.env.PORT || 8787), log = true } = {}) {
+export async function startServer({ host = process.env.HOST || '127.0.0.1', port = Number(process.env.PORT || 8787), log = true, scheduler = true } = {}) {
   const appClient = new CodexAppServerClient();
   const server = createHttpServer({ appClient });
+  const autoScheduler = scheduler ? startAutoScheduler({ appClient, log }) : null;
   await new Promise(resolve => server.listen(port, host, resolve));
   const url = `http://${host}:${port}`;
   if (log) console.log(`input-kanban listening on ${url}`);
   const stop = async () => {
+    autoScheduler?.stop();
     appClient.stop();
     await new Promise(resolve => server.close(resolve));
   };
-  return { server, appClient, host, port, url, version: PACKAGE_VERSION, defaultRepo: DEFAULT_REPO, runsDir: RUNS_DIR, runner: RUNNER, stop };
+  return { server, appClient, autoScheduler, host, port, url, version: PACKAGE_VERSION, defaultWorkspace: DEFAULT_WORKSPACE, defaultRepo: DEFAULT_REPO, runsDir: RUNS_DIR, runner: RUNNER, scheduler: !!autoScheduler, stop };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

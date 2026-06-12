@@ -27,18 +27,14 @@ test('create form exposes worker sandbox selector', () => {
   assert.match(html, /danger-full-access（高风险，跳过沙箱限制）/);
   assert.match(script, /workerSandbox: workerSandbox\.value/);
   assert.match(script, /api\(`\/api\/runs\/\$\{selectedRun\}\/plan`, \{ method: 'POST' \}\)/);
-  assert.match(script, /async function maybeAutoAdvanceRunSummaries\(runs\)/);
-  assert.match(script, /await maybeAutoAdvanceRunSummaries\(latestRuns\)/);
-  assert.match(script, /async function maybeAutoAdvanceSelectedRun\(\)/);
-  assert.match(script, /state\.status === 'planned'/);
-  assert.match(script, /api\(`\/api\/runs\/\$\{runId\}\/dispatch`, \{method:'POST'\}\)/);
-  assert.match(script, /state\.status === 'batches_completed'/);
-  assert.match(script, /api\(`\/api\/runs\/\$\{runId\}\/judge`, \{method:'POST'\}\)/);
-  assert.match(script, /async function autoRetryRun\(runId, refreshSelectedAfter = true\)/);
-  assert.match(script, /api\(`\/api\/runs\/\$\{runId\}\/retry`, \{method:'POST'/);
-  assert.match(script, /AUTO_MAX_RETRIES = 1/);
-  assert.match(script, /state\.status === 'batch_blocked'/);
-  assert.match(script, /if \(!skipAutoAdvance\) await maybeAutoAdvanceSelectedRun\(\)/);
+  assert.doesNotMatch(script, /async function maybeAutoAdvanceRunSummaries/);
+  assert.doesNotMatch(script, /await maybeAutoAdvanceRunSummaries\(latestRuns\)/);
+  assert.doesNotMatch(script, /async function maybeAutoAdvanceSelectedRun/);
+  assert.doesNotMatch(script, /async function autoDispatchRun/);
+  assert.doesNotMatch(script, /async function autoJudgeRun/);
+  assert.doesNotMatch(script, /async function autoRetryRun/);
+  assert.doesNotMatch(script, /AUTO_MAX_RETRIES/);
+  assert.doesNotMatch(script, /skipAutoAdvance/);
   assert.match(script, /planner already running\/i\.test\(detail\)\) return '任务拆分正在进行中，请稍后查看结果。'/);
   assert.match(script, /console\.error\('操作失败', error\)/);
   assert.match(script, /任务仍在执行中，请先停止后再归档。/);
@@ -48,13 +44,45 @@ test('create form exposes worker sandbox selector', () => {
   assert.match(script, /danger: sandbox === 'danger-full-access'/);
 });
 
+test('workspace filter controls are present in the sidebar', () => {
+  assert.match(html, /<div class="workspace-filter-panel">\s*<select id="workspaceFilterSelect"[\s\S]*?<span id="runsLoadHint"/);
+  assert.match(html, /id="runsLoadHint"/);
+  assert.match(html, /class="runs-load-icon"/);
+  assert.match(html, /title="批次列表尚未加载"/);
+  assert.match(html, /id="workspaceFilterSelect"/);
+  assert.match(html, /class="workspace-filter-select"/);
+  assert.match(html, /title="未筛选工作区"/);
+  assert.doesNotMatch(html, /workspaceFilterChips/);
+  assert.doesNotMatch(html, /workspaceFilterHint/);
+  assert.doesNotMatch(html, /workspace-filter-chip/);
+  assert.doesNotMatch(html, /onclick="setWorkspaceFilter\('all'\)"/);
+  assert.doesNotMatch(html, /onclick="setWorkspaceFilter\(currentWorkspacePath \|\| 'all'\)"/);
+  assert.match(script, /const WORKSPACE_FILTER_ALL = '';/);
+  assert.match(script, /let currentWorkspacePath = '';/);
+  assert.match(script, /let selectedWorkspaceFilter = localStorage\.getItem\('input-kanban\.workspaceFilter'\) \|\| WORKSPACE_FILTER_ALL;/);
+  assert.match(script, /let workspaceCatalogRuns = \[];/);
+  assert.match(script, /function renderWorkspaceFilterOptions\(\)/);
+  assert.match(script, /function updateWorkspaceFilterTitle\(\)/);
+  assert.match(script, /function setWorkspaceFilter\(value\)/);
+  assert.match(script, /const startedAt = performance\.now\(\)/);
+  assert.match(script, /hint\.title = `加载 \$\{Math\.round\(performance\.now\(\) - startedAt\)\}ms｜显示 \$\{latestRuns\.length\} 个批次`/);
+  assert.match(script, /hint\.setAttribute\('aria-label', hint\.title\)/);
+  assert.doesNotMatch(script, /function toggleWorkspaceFilter/);
+  assert.match(script, /currentWorkspacePath = h\.defaultWorkspace \|\| h\.defaultRepo \|\| ''/);
+  assert.match(script, /workspaceCatalogRuns/);
+  assert.match(script, /\[WORKSPACE_FILTER_ALL, '工作区筛选'\]/);
+  assert.match(script, /select\.title = currentWorkspacePath \? `未筛选工作区｜默认工作区：\$\{currentWorkspacePath\}` : '未筛选工作区'/);
+  assert.match(script, /selectedWorkspaceFilter = String\(value \|\| ''\)\.trim\(\)/);
+  assert.match(script, /workspacePath \|\| run\.repo/);
+});
+
 test('selected run header uses compact metadata chips', () => {
   assert.match(html, /\.meta-chip/);
   assert.match(html, /\.run-card-meta/);
   assert.match(script, /metaChip\('Run ID', currentState\.runId/);
-  assert.match(script, /metaChip\('仓库', basenamePath\(currentState\.repo\)/);
+  assert.match(script, /metaChip\('工作区', basenamePath\(currentState\.workspacePath \|\| currentState\.repo\)/);
   assert.match(script, /copyRepoPath\(event\)/);
-  assert.match(script, /title="复制仓库地址"/);
+  assert.match(script, /title="复制工作区地址"/);
   assert.match(script, /event\.currentTarget\.textContent = '⧉'/);
   assert.match(script, /metaChip\('终端', tmuxSessionName\(currentState\)/);
   assert.match(script, /metaChip\('用时', formatDurationMs\(durationSeconds\(currentState\.createdAt, runDurationEnd\(currentState\)\) \* 1000\)\)/);
@@ -66,7 +94,7 @@ test('selected run header uses compact metadata chips', () => {
   assert.match(script, /requestAnimationFrame\(triggerRefreshPulse\)/);
   assert.doesNotMatch(script, /durationSeconds\(currentState\.createdAt, currentState\.updatedAt\)/);
   assert.match(script, /copyRunRepoPath\(event, '\$\{r\.runId\}'\)/);
-  assert.match(script, /metaChip\('仓库', basenamePath\(r\.repo\)/);
+  assert.match(script, /metaChip\('工作区', basenamePath\(r\.workspacePath \|\| r\.repo\)/);
   assert.match(script, /metaChip\('用时', runCardDurationText\(r\)\)/);
   assert.doesNotMatch(script, /metaChip\('Run ID', r\.runId/);
   assert.match(script, /metaChip\('进度', `\$\{r\.completed\}\/\$\{r\.total\}`\)/);
@@ -186,7 +214,13 @@ test('manual completion modal captures success result text', () => {
 test('tmux copy action is only exposed at run attach level', () => {
   assert.match(script, /return state\?\.tmux\?\.tmuxAttachCommand \|\| `tmux attach-session -t \$\{tmuxSessionName\(state\)\}`/);
   assert.match(script, /copyTmuxRunCommand\(event\)/);
-  assert.match(script, /async function copyRepoPath\(event, repoPath = currentState\?\.repo \|\| ''\)/);
+  assert.match(script, /function gitChip\(\)/);
+  assert.match(script, /r\.git\?\.isGit \? gitChip\(\) : ''/);
+  assert.match(script, /chips\.push\(gitChip\(\)\)/);
+  assert.doesNotMatch(script, /metaChip\('Git', 'Git'/);
+  assert.doesNotMatch(script, /gitMeta\.branch/);
+  assert.doesNotMatch(script, /dirty \? ' · dirty'/);
+  assert.match(script, /async function copyRepoPath\(event, repoPath = currentState\?\.workspacePath \|\| currentState\?\.repo \|\| ''\)/);
   assert.doesNotMatch(script, /copyTmuxCommand/);
   assert.doesNotMatch(script, /select-window/);
 });

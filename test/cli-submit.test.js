@@ -40,6 +40,10 @@ test('CLI emits JSON runs output for active discovery', async () => {
     runId: 'run_active',
     label: 'active run',
     repo: repoRoot,
+    workspacePath: repoRoot,
+    workspaceName: path.basename(repoRoot),
+    git: { isGit: true, gitRoot: repoRoot, branch: 'main', dirty: false },
+    workspace: { path: repoRoot, name: path.basename(repoRoot), git: { isGit: true, gitRoot: repoRoot, branch: 'main', dirty: false } },
     runner: 'headless',
     workerSandbox: 'workspace-write',
     status: 'running',
@@ -54,6 +58,10 @@ test('CLI emits JSON runs output for active discovery', async () => {
     runId: 'run_done',
     label: 'done run',
     repo: repoRoot,
+    workspacePath: repoRoot,
+    workspaceName: path.basename(repoRoot),
+    git: { isGit: true, gitRoot: repoRoot, branch: 'main', dirty: false },
+    workspace: { path: repoRoot, name: path.basename(repoRoot), git: { isGit: true, gitRoot: repoRoot, branch: 'main', dirty: false } },
     runner: 'headless',
     workerSandbox: 'workspace-write',
     status: 'judged',
@@ -72,6 +80,57 @@ test('CLI emits JSON runs output for active discovery', async () => {
   assert.equal(parsed.count, 1);
   assert.equal(parsed.runs[0].runId, 'run_active');
   assert.equal(parsed.runs[0].running, 1);
+  assert.equal(parsed.runs[0].workspacePath, path.resolve(repoRoot));
+});
+
+test('CLI can filter runs by workspace', async () => {
+  const runsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-json-runs-workspace-'));
+  const workspaceA = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-workspace-a-'));
+  const workspaceB = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-workspace-b-'));
+  await writeRunState(runsDir, 'run_workspace_a', {
+    runId: 'run_workspace_a',
+    label: 'workspace a',
+    repo: workspaceA,
+    workspacePath: workspaceA,
+    workspaceName: path.basename(workspaceA),
+    git: { isGit: false },
+    workspace: { path: workspaceA, name: path.basename(workspaceA), git: { isGit: false } },
+    runner: 'headless',
+    workerSandbox: 'workspace-write',
+    status: 'running',
+    createdAt: '2026-06-10T00:00:01.000Z',
+    updatedAt: '2026-06-10T00:00:01.000Z',
+    planner: { status: 'completed' },
+    tasks: [{ id: 'T-01', status: 'running' }],
+    batches: [],
+    judge: { status: 'pending' }
+  });
+  await writeRunState(runsDir, 'run_workspace_b', {
+    runId: 'run_workspace_b',
+    label: 'workspace b',
+    repo: workspaceB,
+    workspacePath: workspaceB,
+    workspaceName: path.basename(workspaceB),
+    git: { isGit: false },
+    workspace: { path: workspaceB, name: path.basename(workspaceB), git: { isGit: false } },
+    runner: 'headless',
+    workerSandbox: 'workspace-write',
+    status: 'running',
+    createdAt: '2026-06-10T00:00:00.000Z',
+    updatedAt: '2026-06-10T00:00:00.000Z',
+    planner: { status: 'completed' },
+    tasks: [{ id: 'T-02', status: 'running' }],
+    batches: [],
+    judge: { status: 'pending' }
+  });
+  const output = runCli(['--json', 'runs', '--workspace', workspaceA, '--runs-dir', runsDir]);
+  const parsed = JSON.parse(output);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.command, 'runs');
+  assert.equal(parsed.workspace, workspaceA);
+  assert.equal(parsed.count, 1);
+  assert.equal(parsed.runs[0].runId, 'run_workspace_a');
+  assert.equal(parsed.runs[0].workspacePath, workspaceA);
 });
 
 test('CLI emits JSON status output', async () => {
@@ -208,8 +267,10 @@ test('CLI exposes submit auto loop without replacing serve mode', () => {
   assert.match(cli, /await stopRun\(args\.runId, \{ reason: args\.reason \}\)/);
   assert.match(cli, /await createRun\(/);
   assert.match(cli, /await startPlanner\(state\.runId\)/);
-  assert.match(cli, /await dispatchRun\(runId\)/);
-  assert.match(cli, /await startJudge\(runId\)/);
+  assert.match(cli, /const \{ autoAdvanceRun, refreshRun \} = await import\('\.\.\/src\/orchestrator\.js'\)/);
+  assert.match(cli, /await autoAdvanceRun\(runId, \{ startCreated: true, maxRetries, retryReason: 'auto retry from CLI' \}\)/);
+  assert.doesNotMatch(cli, /await dispatchRun\(runId\)/);
+  assert.doesNotMatch(cli, /await startJudge\(runId\)/);
   assert.match(cli, /function hasRecoverableUnknownTask\(state\)/);
   assert.match(cli, /async function confirmFailureTerminal\(runId, state, refreshRun, pollMs\)/);
   assert.match(cli, /Date\.now\(\) \+ 30000/);
@@ -224,7 +285,7 @@ test('README documents CLI runs are visible in the Web dashboard', () => {
   assert.match(readme, /input-kanban submit --task-file task\.md --label "修复登录问题"/);
   assert.match(readme, /input-kanban submit --task "修复登录问题，并补充回归测试" --label "修复登录问题"/);
   assert.match(readme, /input-kanban submit --task-file task\.md -d/);
-  assert.match(readme, /默认 repo 是当前目录/);
+  assert.match(readme, /默认 workspace 是当前目录/);
   assert.match(readme, /如果不传 `--label`，任务批次名称会从任务内容自动生成/);
   assert.match(readme, /CLI 创建的任务会在 Web 界面里可见/);
   assert.match(readme, /input-kanban runs/);

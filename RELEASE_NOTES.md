@@ -1,5 +1,22 @@
 # Release Notes
 
+## v0.0.10
+
+### Highlights
+
+- Adopt a workspace-first model: `workspace` / `--workspace` are now the primary identity for runs, while `repo` / `--repo` remain compatibility aliases.
+- Allow non-Git workspace directories and show Git only as an optional capability marker when detected.
+- Add workspace filtering to CLI/API/Web: `input-kanban runs --workspace <path>` and `/api/runs?workspace=<path>` filter runs by workspace.
+- Add a server-side background scheduler for `input-kanban serve` so unfinished runs continue to advance without relying on an open browser tab.
+- Share auto-advance logic between CLI `submit --auto` / `input-kanban auto <runId>` and the Web server scheduler through the orchestrator.
+- Make `/api/runs` lightweight by reading run summaries without refreshing every historical run, improving cold-start list loading.
+- Simplify the Web sidebar: workspace filtering is a compact dropdown, the redundant list refresh button is removed, list load timing is available via a small hover icon, and Git is shown as a simple marker.
+
+### Verification
+
+- `npm run check` passed with 62 tests.
+- `npm pack --dry-run` passed before publishing.
+
 ## v0.0.9
 
 ### Highlights
