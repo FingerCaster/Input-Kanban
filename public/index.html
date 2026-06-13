@@ -66,8 +66,8 @@
     .workspace-filter-select { flex: 1 1 auto; min-width: 0; font-size: 12px; padding: 7px 9px; color: #cbd5e1; }
     .task-text { max-height: 180px; color: #cbd5e1; }
     .empty { color: var(--muted); padding: 18px 0; }
-    .runs-load-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; cursor: help; opacity: .72; }
-    .runs-load-icon:hover { opacity: 1; color: #cbd5e1; border-color: var(--line-strong); }
+    .info-icon, .runs-load-icon { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; cursor: help; opacity: .72; }
+    .info-icon:hover, .runs-load-icon:hover { opacity: 1; color: #cbd5e1; border-color: var(--line-strong); }
     .run-list { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow-y: auto; padding-right: 4px; }
     .run-list-more { width: 100%; margin-top: 4px; }
     .run-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: var(--panel-2); cursor: pointer; transition: border-color .15s, transform .15s, background .15s; }
@@ -156,7 +156,7 @@
         <option value="read-only">read-only（只读）</option>
         <option value="danger-full-access">danger-full-access（高风险，跳过沙箱限制）</option>
       </select>
-      <div class="muted">仅影响 worker；任务拆分和汇总验收仍保持 read-only。</div>
+      <div class="muted">仅影响 worker；任务拆分和汇总验收仍保持 read-only。若执行过程提示 Permission denied / sandbox denied，这通常不是任务本身失败，而是当前沙箱能力不足；在可信工作区可改用 danger-full-access。DNS / 网络失败则通常需要检查代理、VPN 或本地 evidence。</div>
       <label>任务说明</label><textarea id="taskText" placeholder="粘贴任务说明"></textarea>
       <div class="toolbar">
         <button onclick="createRun()">创建批次</button>
@@ -185,7 +185,10 @@
     </section>
 
     <section id="filePanel" class="log-panel">
-      <h2>任务详情</h2>
+      <div class="section-header">
+        <h2>任务详情</h2>
+        <span class="info-icon" title="若执行过程提示 Permission denied / sandbox denied，这通常不是任务本身失败，而是当前 worker 沙箱能力不足；在可信工作区可改用 danger-full-access。DNS / 网络失败则通常需要检查代理、VPN 或本地 evidence。" aria-label="任务详情权限与网络提示">ⓘ</span>
+      </div>
       <div id="fileTitle" class="muted">点击任务后查看详情</div>
       <div id="fileTabs" class="toolbar file-tabs"></div>
       <div id="executionSummary" class="execution-summary hidden"></div>
@@ -225,6 +228,8 @@ const statusByRunId = new Map();
 const AUTO_REFRESH_MS = 3000;
 const RUN_LIST_PAGE_SIZE = 10;
 const WORKSPACE_FILTER_ALL = '';
+const WORKER_SANDBOX_STORAGE_KEY = 'input-kanban.workerSandbox';
+const VALID_WORKER_SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 let currentWorkspacePath = '';
 let selectedWorkspaceFilter = localStorage.getItem('input-kanban.workspaceFilter') || WORKSPACE_FILTER_ALL;
 
@@ -363,7 +368,20 @@ function hideCreateForm() {
   document.getElementById('detailPanel').classList.remove('hidden');
   document.getElementById('filePanel').classList.remove('hidden');
 }
+function saveWorkerSandboxPreference() {
+  const select = document.getElementById('workerSandbox');
+  const value = select?.value || '';
+  if (VALID_WORKER_SANDBOXES.has(value)) localStorage.setItem(WORKER_SANDBOX_STORAGE_KEY, value);
+}
+function initializeWorkerSandboxPreference() {
+  const select = document.getElementById('workerSandbox');
+  if (!select) return;
+  const saved = localStorage.getItem(WORKER_SANDBOX_STORAGE_KEY);
+  if (VALID_WORKER_SANDBOXES.has(saved)) select.value = saved;
+  select.addEventListener('change', saveWorkerSandboxPreference);
+}
 async function createRun() {
+  saveWorkerSandboxPreference();
   const body = { label: label.value, workspace: repo.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, taskText: taskText.value };
   const r = await api('/api/runs', { method: 'POST', body: JSON.stringify(body) });
   selectedRun = r.runId; selectedTask = null; selectedFileName = null;
@@ -658,6 +676,7 @@ async function loadFile(name, { preserveScroll = false } = {}) {
   selectedFileName = name;
   const pre = document.getElementById('fileContent');
   const previousScrollTop = pre.scrollTop;
+  const wasAtBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 24;
   let text;
   const selected = taskById(selectedTask);
   if (name === 'result.json' && selected?.manualCompletion?.hasManualResult) {
@@ -667,7 +686,8 @@ async function loadFile(name, { preserveScroll = false } = {}) {
     text = await api(`/api/runs/${selectedRun}/tasks/${selectedTask}/file?name=${encodeURIComponent(name)}`);
   }
   pre.textContent = text;
-  if (preserveScroll) pre.scrollTop = previousScrollTop;
+  if (name === 'events.pretty' && (!preserveScroll || wasAtBottom)) pre.scrollTop = pre.scrollHeight;
+  else if (preserveScroll) pre.scrollTop = previousScrollTop;
   else pre.scrollTop = 0;
   if (name === 'events.pretty') await renderExecutionSummary();
   else hideExecutionSummary();
@@ -976,6 +996,7 @@ async function submitManualComplete() {
   await loadFile('result.json');
 }
 
+initializeWorkerSandboxPreference();
 loadHealth().then(refreshRuns);
 setInterval(() => { if (selectedRun) refreshSelected({auto:true}).catch(console.error); else refreshRuns().catch(console.error); }, AUTO_REFRESH_MS);
 </script>

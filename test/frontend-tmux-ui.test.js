@@ -31,7 +31,15 @@ test('sidebar header keeps a compact create action', () => {
 test('create form exposes worker sandbox selector', () => {
   assert.match(html, /<select id="workerSandbox">/);
   assert.match(html, /danger-full-access（高风险，跳过沙箱限制）/);
+  assert.match(html, /这通常不是任务本身失败，而是当前沙箱能力不足/);
+  assert.match(html, /DNS \/ 网络失败则通常需要检查代理、VPN 或本地 evidence/);
   assert.match(script, /workerSandbox: workerSandbox\.value/);
+  assert.match(script, /const WORKER_SANDBOX_STORAGE_KEY = 'input-kanban\.workerSandbox'/);
+  assert.match(script, /const VALID_WORKER_SANDBOXES = new Set\(\['read-only', 'workspace-write', 'danger-full-access'\]\)/);
+  assert.match(script, /function initializeWorkerSandboxPreference\(\)/);
+  assert.match(script, /localStorage\.getItem\(WORKER_SANDBOX_STORAGE_KEY\)/);
+  assert.match(script, /select\.addEventListener\('change', saveWorkerSandboxPreference\)/);
+  assert.match(script, /saveWorkerSandboxPreference\(\);\n  const body = \{ label: label\.value/);
   assert.match(script, /api\(`\/api\/runs\/\$\{selectedRun\}\/plan`, \{ method: 'POST' \}\)/);
   assert.doesNotMatch(script, /async function maybeAutoAdvanceRunSummaries/);
   assert.doesNotMatch(script, /await maybeAutoAdvanceRunSummaries\(latestRuns\)/);
@@ -142,6 +150,9 @@ test('task table has no tmux column or file-viewer tmux panel', () => {
 
 test('file viewer renders role-specific file tabs', () => {
   assert.match(html, /<h2>任务详情<\/h2>/);
+  assert.match(html, /aria-label="任务详情权限与网络提示"/);
+  assert.match(html, /当前 worker 沙箱能力不足/);
+  assert.match(html, /DNS \/ 网络失败则通常需要检查代理、VPN 或本地 evidence/);
   assert.match(html, /点击任务后查看详情/);
   assert.match(script, /点击任务后查看详情/);
   assert.doesNotMatch(html, /<h2>文件查看<\/h2>/);
@@ -156,6 +167,9 @@ test('file viewer renders role-specific file tabs', () => {
   assert.match(script, /\['events\.pretty', '执行过程'\]/);
   assert.match(script, /tabs\.find\(\(\[name\]\) => name === 'events\.pretty'\)/);
   assert.match(script, /await loadFile\(defaultTab\[0\]\)/);
+  assert.match(script, /const wasAtBottom = pre\.scrollHeight - pre\.scrollTop - pre\.clientHeight < 24/);
+  assert.match(script, /name === 'events\.pretty' && \(!preserveScroll \|\| wasAtBottom\)/);
+  assert.match(script, /pre\.scrollTop = pre\.scrollHeight/);
   assert.doesNotMatch(script, /\['manual_result\.md', '人工结果'\]/);
   assert.match(html, /\.summary-chip/);
   assert.match(html, /\.summary-chip\.command-type/);
