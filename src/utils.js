@@ -3,11 +3,12 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { version: PACKAGE_VERSION } = require('../package.json');
 
-export const APP_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+export const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export { PACKAGE_VERSION };
 export const DEFAULT_WORKSPACE = path.resolve(process.env.KANBAN_DEFAULT_WORKSPACE || process.env.KANBAN_DEFAULT_REPO || process.cwd());
 export const DEFAULT_REPO = DEFAULT_WORKSPACE;
