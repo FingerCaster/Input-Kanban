@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { CODEX_BIN } from '../utils.js';
+import { resolveCodexLauncher } from '../codexLauncher.js';
 
 function processKey(runId, taskId) {
   return `${runId}:${taskId}`;
@@ -47,18 +48,34 @@ export function createHeadlessRunner({ codexBin = CODEX_BIN } = {}) {
     const last = path.join(outDir, 'last_message.md');
     fs.writeFileSync(path.join(outDir, 'prompt.md'), prompt);
     const args = ['exec', '--json', '--sandbox', sandbox, '-C', cwd, '-o', last, prompt];
-    const child = spawn(codexBin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    const { command, argsPrefix } = resolveCodexLauncher(codexBin);
+    const child = spawn(command, [...argsPrefix, ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     captureEventsWithTimestamps(child.stdout, events, timedEvents);
     child.stderr.pipe(fs.createWriteStream(stderr, { flags: 'a' }));
     const key = processKey(runId, taskId);
-    runningProcesses.set(key, child);
-    child.on('exit', code => {
+    const listeners = [];
+    let exited = false;
+    let exitCode = null;
+    const finish = code => {
+      if (exited) return;
+      exited = true;
+      exitCode = code;
       try { fs.writeFileSync(path.join(outDir, 'exit_code'), String(code)); } catch {}
       runningProcesses.delete(key);
+      for (const listener of listeners) listener(code);
+    };
+    runningProcesses.set(key, child);
+    child.on('error', error => {
+      try { fs.appendFileSync(stderr, `${error.message || String(error)}\n`); } catch {}
+      finish(error?.code === 'ENOENT' ? 127 : 1);
     });
+    child.on('exit', code => finish(code));
     return {
-      pid: child.pid,
-      onExit(listener) { child.on('exit', listener); },
+      pid: child.pid ?? null,
+      onExit(listener) {
+        if (exited) listener(exitCode);
+        else listeners.push(listener);
+      },
       stop(signal = 'TERM') { child.kill(signal); }
     };
   }

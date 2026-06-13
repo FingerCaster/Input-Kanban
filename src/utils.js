@@ -3,9 +3,13 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import { resolveCodexLauncher } from './codexLauncher.js';
 
 const require = createRequire(import.meta.url);
+const execFileAsync = promisify(execFile);
 const { version: PACKAGE_VERSION } = require('../package.json');
 
 export const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -14,6 +18,8 @@ export const DEFAULT_WORKSPACE = path.resolve(process.env.KANBAN_DEFAULT_WORKSPA
 export const DEFAULT_REPO = DEFAULT_WORKSPACE;
 export const RUNS_DIR = path.resolve(process.env.KANBAN_RUNS_DIR || path.join(process.env.HOME || APP_ROOT, '.input-kanban', 'runs'));
 export const CODEX_BIN = process.env.KANBAN_CODEX_BIN || 'codex';
+export const CODEX_NPM_PACKAGE = '@openai/codex';
+export const CODEX_CHECK_LATEST = process.env.KANBAN_CODEX_CHECK_LATEST === '1';
 export const VALID_RUNNERS = ['headless', 'tmux'];
 
 export function normalizeRunner(value = 'headless', source = 'KANBAN_RUNNER') {
@@ -43,6 +49,48 @@ export async function writeJsonAtomic(file, data) {
 export async function fileInfo(file) {
   try { const st = await fsp.stat(file); return { exists: true, size: st.size, mtimeMs: st.mtimeMs, mtime: st.mtime.toISOString() }; }
   catch { return { exists: false }; }
+}
+
+function parseCodexVersion(output) {
+  const text = String(output || '').trim();
+  const match = text.match(/(\d+\.\d+\.\d+)/);
+  return match ? match[1] : text || null;
+}
+
+export async function detectCodexInfo(codexBin = CODEX_BIN, { checkLatest = CODEX_CHECK_LATEST } = {}) {
+  const info = {
+    command: codexBin,
+    packageName: CODEX_NPM_PACKAGE,
+    installCommand: `npm install -g ${CODEX_NPM_PACKAGE}`,
+    updateCommand: `npm install -g ${CODEX_NPM_PACKAGE}`,
+    installed: false,
+    installedVersion: null,
+    latestVersion: null,
+    updateAvailable: false,
+    versionText: '',
+    installHint: '',
+    latestCheckEnabled: !!checkLatest
+  };
+  try {
+    const { command, argsPrefix } = resolveCodexLauncher(codexBin);
+    const { stdout } = await execFileAsync(command, [...argsPrefix, '--version'], { timeout: 5000, windowsHide: true });
+    const text = String(stdout || '').trim();
+    info.installed = true;
+    info.versionText = text;
+    info.installedVersion = parseCodexVersion(text);
+  } catch (error) {
+    info.installHint = error?.code === 'ENOENT' ? 'codex command not found' : (error?.message || String(error));
+  }
+  if (checkLatest) {
+    try {
+      const { stdout } = await execFileAsync('npm', ['view', CODEX_NPM_PACKAGE, 'version', '--json'], { timeout: 5000, windowsHide: true });
+      const parsed = JSON.parse(String(stdout || '').trim());
+      const latest = Array.isArray(parsed) ? parsed.at(-1) : parsed;
+      if (typeof latest === 'string' && latest.trim()) info.latestVersion = latest.trim();
+    } catch {}
+  }
+  info.updateAvailable = !!(info.installedVersion && info.latestVersion && info.installedVersion !== info.latestVersion);
+  return info;
 }
 export async function readTextMaybe(file, maxBytes=200000) {
   try {
