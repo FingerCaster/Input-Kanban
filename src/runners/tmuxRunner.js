@@ -45,6 +45,10 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
+function bashArrayAssignment(name, values) {
+  return `${name}=(${values.map(value => shellQuote(value)).join(' ')})`;
+}
+
 const BIN_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../bin');
 const FORMATTER_BIN = path.join(BIN_DIR, 'input-kanban-format-events.js');
 const TIMESTAMP_BIN = path.join(BIN_DIR, 'input-kanban-timestamp-events.js');
@@ -57,11 +61,11 @@ function buildOverviewCommand(runStatePath) {
 }
 
 function buildRunScript({ codexCommand, codexArgsPrefix = [], formatterBin = FORMATTER_BIN, timestampBin = TIMESTAMP_BIN, sandbox, cwd, outDir, runId, taskId, role }) {
-  const codexInvocation = [shellQuote(codexCommand), ...codexArgsPrefix.map(arg => shellQuote(arg))].join(' ');
+  const codexLauncher = bashArrayAssignment('CODEX_LAUNCHER', [codexCommand, ...codexArgsPrefix]);
   return `#!/usr/bin/env bash
 set -u
 
-CODEX_BIN=${shellQuote(codexCommand)}
+${codexLauncher}
 SANDBOX=${shellQuote(sandbox)}
 CWD=${shellQuote(cwd)}
 OUT_DIR=${shellQuote(outDir)}
@@ -80,7 +84,7 @@ EXIT_CODE="$OUT_DIR/exit_code"
 cd "$CWD"
 rm -f "$EXIT_CODE"
 touch "$EVENTS" "$TIMED_EVENTS" "$STDERR_LOG"
-${codexInvocation} exec --json --sandbox "$SANDBOX" -C "$CWD" -o "$LAST_MESSAGE" "$(<"$PROMPT_FILE")" > >(node "$TIMESTAMP_BIN" "$EVENTS" "$TIMED_EVENTS" | node "$FORMATTER_BIN") 2> >(tee -a "$STDERR_LOG" >&2)
+"\${CODEX_LAUNCHER[@]}" exec --json --sandbox "$SANDBOX" -C "$CWD" -o "$LAST_MESSAGE" "$(<"$PROMPT_FILE")" > >(node "$TIMESTAMP_BIN" "$EVENTS" "$TIMED_EVENTS" | node "$FORMATTER_BIN") 2> >(tee -a "$STDERR_LOG" >&2)
 code=$?
 printf '%s' "$code" > "$EXIT_CODE"
 printf '\\nInput Kanban tmux task completed.\\n'

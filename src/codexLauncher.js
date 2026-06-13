@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 
+const MAX_SHIM_BYTES = 64 * 1024;
+const WHERE_TIMEOUT_MS = 5000;
+
 function existingPath(filePath) {
   return fs.existsSync(filePath) ? filePath : null;
 }
@@ -25,6 +28,8 @@ function codexJsFromShim(shimPath) {
 function readShimTarget(filePath) {
   try {
     if (/codex\.js$/i.test(filePath)) return filePath;
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size > MAX_SHIM_BYTES) return null;
     const text = fs.readFileSync(filePath, 'utf8');
     const shimJs = codexJsFromShim(filePath);
     if (shimJs && /(?:@openai[\\/]+codex|node_modules[\\/]+@openai[\\/]+codex)[\\/]+bin[\\/]+codex\.js/i.test(text)) return shimJs;
@@ -34,33 +39,45 @@ function readShimTarget(filePath) {
   }
 }
 
-function isPathLike(value) {
-  return path.isAbsolute(value) || value.includes(path.sep) || value.includes('/') || value.includes('\\') || /\.(?:cmd|bat|ps1|c?js|mjs)$/i.test(value);
+function hasPathSeparator(value) {
+  return path.isAbsolute(value) || value.includes(path.sep) || value.includes('/') || value.includes('\\');
+}
+
+function resolvePathCandidate(value) {
+  if (/\.(?:c?js|mjs)$/i.test(value)) return { command: process.execPath, argsPrefix: [value] };
+  const shimJs = readShimTarget(value);
+  if (shimJs) return { command: process.execPath, argsPrefix: [shimJs] };
+  return { command: value, argsPrefix: [] };
+}
+
+function whereCandidates(value) {
+  const where = spawnSync('where.exe', [value], {
+    encoding: 'utf8',
+    timeout: WHERE_TIMEOUT_MS,
+    windowsHide: true
+  });
+  return String(where.stdout || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+}
+
+function resolveFromPath(value) {
+  const seen = new Set();
+  for (const candidate of whereCandidates(value)) {
+    if (seen.has(candidate)) continue;
+    seen.add(candidate);
+    const resolved = resolvePathCandidate(candidate);
+    if (resolved.command !== candidate || fs.existsSync(candidate)) return resolved;
+  }
+  return null;
 }
 
 function resolveWindowsCodexLauncher(spec) {
   const value = String(spec || '').trim() || 'codex';
-  if (isPathLike(value)) {
-    if (/\.(?:c?js|mjs)$/i.test(value)) return { command: process.execPath, argsPrefix: [value] };
-    const shimJs = readShimTarget(value);
-    if (shimJs) return { command: process.execPath, argsPrefix: [shimJs] };
-    return { command: value, argsPrefix: [] };
-  }
+  if (hasPathSeparator(value)) return resolvePathCandidate(value);
 
-  if (value.toLowerCase() !== 'codex') return { command: value, argsPrefix: [] };
+  const pathResolved = resolveFromPath(value);
+  if (pathResolved) return pathResolved;
 
-  const where = spawnSync('where.exe', [value], { encoding: 'utf8' });
-  const candidates = String(where.stdout || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
-  const seen = new Set();
-  for (const candidate of candidates) {
-    if (seen.has(candidate)) continue;
-    seen.add(candidate);
-    const shimJs = readShimTarget(candidate);
-    if (shimJs) return { command: process.execPath, argsPrefix: [shimJs] };
-    if (fs.existsSync(candidate)) return { command: candidate, argsPrefix: [] };
-  }
-
-  return { command: value, argsPrefix: [] };
+  return resolvePathCandidate(value);
 }
 
 export function resolveCodexLauncher(spec = 'codex') {

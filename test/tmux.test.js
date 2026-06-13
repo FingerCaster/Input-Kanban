@@ -177,8 +177,9 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
   assert.equal(await fsp.readFile(path.join(outDir, 'prompt.md'), 'utf8'), 'plan this');
 
   const script = await fsp.readFile(path.join(outDir, 'run.sh'), 'utf8');
-  assert.match(script, /CODEX_BIN='\/usr\/local\/bin\/codex'/);
-  assert.match(script, /'\/usr\/local\/bin\/codex' exec --json --sandbox/);
+  assert.match(script, /CODEX_LAUNCHER=\('\/usr\/local\/bin\/codex'\)/);
+  assert.match(script, /"\$\{CODEX_LAUNCHER\[@\]\}" exec --json --sandbox/);
+  assert.doesNotMatch(script, /CODEX_BIN=/);
   assert.match(script, /touch "\$EVENTS" "\$TIMED_EVENTS" "\$STDERR_LOG"/);
   assert.match(script, /FORMATTER_BIN='/);
   assert.match(script, /TIMESTAMP_BIN='/);
@@ -231,6 +232,50 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
   });
   assert.equal(exitCode, 0);
   assert.equal(runner.hasRunning('run_01', 'planner'), false);
+});
+
+test('tmux run script quotes codex launcher arrays with spaces and shell characters', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-tmux-quote-'));
+  const outDir = path.join(tmp, 'planner');
+  const codexStub = path.join(tmp, "Codex Dir", "codex user's stub.js");
+  await fsp.mkdir(path.dirname(codexStub), { recursive: true });
+  await fsp.writeFile(codexStub, 'console.log("codex");\n');
+  const { runner: commandRunner } = makeRunner((_command, args) => {
+    if (args[0] === '-V') return { code: 0, stdout: 'tmux 3.4\n' };
+    if (args[0] === 'has-session') return { code: 1, stderr: 'no such session' };
+    return { code: 0, stdout: '' };
+  });
+  const runner = createTmuxRunner({
+    codexBin: codexStub,
+    tmuxOptions: { runner: commandRunner },
+    pollMs: 20
+  });
+
+  const handle = await runner.startCodexTask({
+    runId: 'run_quote',
+    taskId: 'planner',
+    prompt: 'plan this',
+    sandbox: 'read-only',
+    cwd: tmp,
+    outDir
+  });
+
+  const script = await fsp.readFile(path.join(outDir, 'run.sh'), 'utf8');
+  if (process.platform === 'win32') {
+    assert.match(script, /CODEX_LAUNCHER=\('/);
+    assert.ok(script.includes(process.execPath));
+    assert.match(script, /codex user'\\''s stub\.js/);
+  } else {
+    assert.match(script, /CODEX_LAUNCHER=\('/);
+    assert.match(script, /codex user'\\''s stub\.js/);
+  }
+  assert.match(script, /"\$\{CODEX_LAUNCHER\[@\]\}" exec --json --sandbox/);
+
+  const exitCode = await new Promise(resolve => {
+    handle.onExit(resolve);
+    fsp.writeFile(path.join(outDir, 'exit_code'), '0');
+  });
+  assert.equal(exitCode, 0);
 });
 
 test('tmux runner records failed metadata without ready commands when tmux creation fails', async () => {
@@ -352,6 +397,7 @@ test('headless runner records spawn failures for missing custom launcher', async
   });
   const exitCode = await new Promise(resolve => handle.onExit(resolve));
 
+  assert.equal(handle.pid, null);
   assert.equal(exitCode, 127);
   assert.equal(await fsp.readFile(path.join(outDir, 'exit_code'), 'utf8'), '127');
   assert.match(await fsp.readFile(path.join(outDir, 'stderr.log'), 'utf8'), /input-kanban-missing-codex-bin|ENOENT|not found/i);

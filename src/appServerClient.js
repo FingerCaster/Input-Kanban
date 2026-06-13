@@ -10,27 +10,49 @@ export class CodexAppServerClient {
     this.pending = new Map();
     this.initialized = false;
     this.stderrTail = [];
+    this.rl = null;
   }
 
   start() {
-    if (this.proc) return;
+    if (this.proc) return this.proc;
     const { command, argsPrefix } = resolveCodexLauncher(CODEX_BIN);
     this.proc = spawn(command, [...argsPrefix, 'app-server', '--stdio'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const proc = this.proc;
     const rl = readline.createInterface({ input: this.proc.stdout });
+    this.rl = rl;
     rl.on('line', line => this.#handleLine(line));
-    this.proc.stderr.on('data', d => this.#pushStderr(String(d)));
-    this.proc.on('error', error => {
-      for (const { reject } of this.pending.values()) reject(error);
-      this.pending.clear();
+    proc.stderr.on('data', d => this.#pushStderr(String(d)));
+    proc.on('error', error => {
+      this.#rejectPendingFor(proc, error);
+      this.#clearProcess(proc, rl);
+    });
+    proc.on('exit', code => {
+      this.#rejectPendingFor(proc, new Error(`app-server exited: ${code}`));
+      this.#clearProcess(proc, rl);
+    });
+    return proc;
+  }
+
+  #rejectPendingFor(proc, error) {
+    for (const [id, pending] of this.pending.entries()) {
+      if (pending.proc !== proc) continue;
+      this.pending.delete(id);
+      pending.reject(error);
+    }
+  }
+
+  #rejectAllPending(error) {
+    for (const { reject } of this.pending.values()) reject(error);
+    this.pending.clear();
+  }
+
+  #clearProcess(proc = this.proc, rl = this.rl) {
+    rl?.close();
+    if (this.rl === rl) this.rl = null;
+    if (this.proc === proc) {
       this.proc = null;
       this.initialized = false;
-    });
-    this.proc.on('exit', code => {
-      for (const { reject } of this.pending.values()) reject(new Error(`app-server exited: ${code}`));
-      this.pending.clear();
-      this.proc = null;
-      this.initialized = false;
-    });
+    }
   }
 
   #pushStderr(s) {
@@ -50,17 +72,36 @@ export class CodexAppServerClient {
   }
 
   async request(method, params = null, timeoutMs = 15000) {
-    this.start();
+    const proc = this.start();
     const id = this.nextId++;
     const msg = { id, method };
     if (params !== null) msg.params = params;
     return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let timer;
+      let pending;
+      const fail = error => {
+        if (this.pending.get(id) !== pending) return;
         this.pending.delete(id);
-        reject(new Error(`app-server request timeout: ${method}`));
-      }, timeoutMs);
-      this.pending.set(id, { resolve: v => { clearTimeout(timer); resolve(v); }, reject: e => { clearTimeout(timer); reject(e); } });
-      this.proc.stdin.write(JSON.stringify(msg) + '\n');
+        pending.reject(error);
+      };
+      pending = {
+        proc,
+        resolve: v => { clearTimeout(timer); resolve(v); },
+        reject: e => { clearTimeout(timer); reject(e); }
+      };
+      timer = setTimeout(() => fail(new Error(`app-server request timeout: ${method}`)), timeoutMs);
+      this.pending.set(id, pending);
+      if (this.proc !== proc || !proc?.stdin?.writable || proc.stdin.destroyed) {
+        fail(new Error(`app-server unavailable: ${method}`));
+        return;
+      }
+      try {
+        proc.stdin.write(JSON.stringify(msg) + '\n', error => {
+          if (error) fail(error);
+        });
+      } catch (error) {
+        fail(error);
+      }
     });
   }
 
@@ -87,8 +128,11 @@ export class CodexAppServerClient {
 
   stop() {
     if (!this.proc) return;
-    this.proc.kill('TERM');
-    this.proc = null;
+    const proc = this.proc;
+    const rl = this.rl;
+    this.proc.kill();
+    this.#rejectAllPending(new Error('app-server stopped'));
+    this.#clearProcess(proc, rl);
   }
 }
 

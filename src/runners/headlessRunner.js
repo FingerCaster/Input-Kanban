@@ -71,7 +71,7 @@ export function createHeadlessRunner({ codexBin = CODEX_BIN } = {}) {
     });
     child.on('exit', code => finish(code));
     return {
-      pid: child.pid,
+      pid: child.pid ?? null,
       onExit(listener) {
         if (exited) listener(exitCode);
         else listeners.push(listener);
