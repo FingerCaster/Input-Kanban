@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { CODEX_BIN } from './utils.js';
+import { resolveCodexLauncher } from './codexLauncher.js';
 
 export class CodexAppServerClient {
   constructor() {
@@ -13,10 +14,17 @@ export class CodexAppServerClient {
 
   start() {
     if (this.proc) return;
-    this.proc = spawn(CODEX_BIN, ['app-server', '--stdio'], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const { command, argsPrefix } = resolveCodexLauncher(CODEX_BIN);
+    this.proc = spawn(command, [...argsPrefix, 'app-server', '--stdio'], { stdio: ['pipe', 'pipe', 'pipe'] });
     const rl = readline.createInterface({ input: this.proc.stdout });
     rl.on('line', line => this.#handleLine(line));
     this.proc.stderr.on('data', d => this.#pushStderr(String(d)));
+    this.proc.on('error', error => {
+      for (const { reject } of this.pending.values()) reject(error);
+      this.pending.clear();
+      this.proc = null;
+      this.initialized = false;
+    });
     this.proc.on('exit', code => {
       for (const { reject } of this.pending.values()) reject(new Error(`app-server exited: ${code}`));
       this.pending.clear();

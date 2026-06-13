@@ -178,7 +178,7 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
 
   const script = await fsp.readFile(path.join(outDir, 'run.sh'), 'utf8');
   assert.match(script, /CODEX_BIN='\/usr\/local\/bin\/codex'/);
-  assert.match(script, /\$CODEX_BIN" exec --json --sandbox/);
+  assert.match(script, /'\/usr\/local\/bin\/codex' exec --json --sandbox/);
   assert.match(script, /touch "\$EVENTS" "\$TIMED_EVENTS" "\$STDERR_LOG"/);
   assert.match(script, /FORMATTER_BIN='/);
   assert.match(script, /TIMESTAMP_BIN='/);
@@ -311,8 +311,10 @@ test('tmux run script keep-open summary is generated for worker and judge roles'
 test('headless runner does not generate tmux keep-open run script', async () => {
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-headless-runner-'));
   const outDir = path.join(tmp, 'worker');
+  const codexStub = path.join(tmp, 'codex-stub.js');
   await fsp.mkdir(outDir, { recursive: true });
-  const runner = createHeadlessRunner({ codexBin: '/bin/echo' });
+  await fsp.writeFile(codexStub, 'process.stdout.write(JSON.stringify({ type: "session.created" }) + "\\n");\n');
+  const runner = createHeadlessRunner({ codexBin: codexStub });
 
   const handle = runner.startCodexTask({
     runId: 'run_headless',
@@ -332,4 +334,25 @@ test('headless runner does not generate tmux keep-open run script', async () => 
   const timedEvents = await fsp.readFile(path.join(outDir, 'events_timed.jsonl'), 'utf8');
   assert.match(timedEvents, /"receivedAt"/);
   assert.equal(await fsp.readFile(path.join(outDir, 'exit_code'), 'utf8'), '0');
+});
+
+test('headless runner records spawn failures for missing custom launcher', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-headless-spawn-fail-'));
+  const outDir = path.join(tmp, 'worker');
+  await fsp.mkdir(outDir, { recursive: true });
+  const runner = createHeadlessRunner({ codexBin: 'input-kanban-missing-codex-bin' });
+
+  const handle = runner.startCodexTask({
+    runId: 'run_spawn_fail',
+    taskId: 'T-01',
+    prompt: 'headless prompt',
+    sandbox: 'read-only',
+    cwd: tmp,
+    outDir
+  });
+  const exitCode = await new Promise(resolve => handle.onExit(resolve));
+
+  assert.equal(exitCode, 127);
+  assert.equal(await fsp.readFile(path.join(outDir, 'exit_code'), 'utf8'), '127');
+  assert.match(await fsp.readFile(path.join(outDir, 'stderr.log'), 'utf8'), /input-kanban-missing-codex-bin|ENOENT|not found/i);
 });
