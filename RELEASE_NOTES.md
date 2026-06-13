@@ -1,5 +1,20 @@
 # Release Notes
 
+## v0.0.12
+
+### Highlights
+
+- Fix Windows startup/static serving by resolving `APP_ROOT` with `fileURLToPath(import.meta.url)` instead of URL pathname parsing.
+- Add a regression test for serving `/` and `/api/health` from the HTTP server.
+- Add task-detail hover guidance for sandbox and network capability issues, clarifying that sandbox-denied errors are not necessarily task failures.
+- Remember the last selected Web worker sandbox mode in browser local storage, so users do not need to reselect `danger-full-access` or other modes each time.
+- Auto-scroll the execution process view to the end when opened, while preserving the user's scroll position during refresh if they have scrolled upward.
+
+### Verification
+
+- `npm run check` passed with 64 tests.
+- `npm pack --dry-run` passed before release prep.
+
 ## v0.0.11
 
 ### Highlights
