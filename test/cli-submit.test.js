@@ -72,15 +72,34 @@ test('CLI emits JSON runs output for active discovery', async () => {
     batches: [],
     judge: { status: 'completed' }
   });
+  await writeRunState(runsDir, 'run_blocked', {
+    runId: 'run_blocked',
+    label: 'blocked run',
+    repo: repoRoot,
+    workspacePath: repoRoot,
+    workspaceName: path.basename(repoRoot),
+    git: { isGit: true, gitRoot: repoRoot, branch: 'main', dirty: false },
+    workspace: { path: repoRoot, name: path.basename(repoRoot), git: { isGit: true, gitRoot: repoRoot, branch: 'main', dirty: false } },
+    runner: 'headless',
+    workerSandbox: 'workspace-write',
+    status: 'batch_blocked',
+    createdAt: '2026-06-10T00:00:02.000Z',
+    updatedAt: '2026-06-10T00:00:02.000Z',
+    planner: { status: 'completed' },
+    tasks: [{ id: 'T-02', status: 'failed' }],
+    batches: [],
+    judge: { status: 'pending' }
+  });
   const output = runCli(['--json', 'runs', '--active', '--runs-dir', runsDir]);
   const parsed = JSON.parse(output);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.command, 'runs');
   assert.equal(parsed.active, true);
-  assert.equal(parsed.count, 1);
-  assert.equal(parsed.runs[0].runId, 'run_active');
-  assert.equal(parsed.runs[0].running, 1);
-  assert.equal(parsed.runs[0].workspacePath, path.resolve(repoRoot));
+  assert.equal(parsed.count, 2);
+  assert.deepEqual(parsed.runs.map(run => run.runId), ['run_blocked', 'run_active']);
+  assert.equal(parsed.runs[0].status, 'batch_blocked');
+  assert.equal(parsed.runs[1].running, 1);
+  assert.equal(parsed.runs[1].workspacePath, path.resolve(repoRoot));
 });
 
 test('CLI can filter runs by workspace', async () => {

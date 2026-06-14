@@ -509,7 +509,7 @@ function isFailureTerminal(state) {
 function isActiveRunSummary(run) {
   if (!run) return false;
   if (Number(run.running) > 0) return true;
-  return !['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(run.status);
+  return !['judged', 'judge_failed', 'plan_failed', 'plan_empty', 'stopped'].includes(run.status);
 }
 
 function hasRecoverableUnknownTask(state) {

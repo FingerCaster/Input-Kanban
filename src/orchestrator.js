@@ -1048,6 +1048,8 @@ async function retryTasksInState(state, taskIds = null, { auto = false, maxRetri
   if (!tasksToRetry.length) return { retried: [], state };
   for (const task of tasksToRetry) {
     if (hasLiveRunnerProcess(state, task.id, task)) throw new Error(`task still has a live process: ${task.id}`);
+  }
+  for (const task of tasksToRetry) {
     const batch = (state.batches || []).find(item => item.id === task.batchId);
     task.retryReason = reason;
     await rotateWorkerAttempt(state, task);

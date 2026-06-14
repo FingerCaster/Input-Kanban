@@ -17,7 +17,7 @@ test('header, browser tab, and footer show Input Kanban identity', () => {
   assert.match(html, /<link rel="mask-icon" href="\/assets\/input-kanban-mask-icon\.svg" color="#2563eb" \/>/);
   assert.match(html, /<link rel="apple-touch-icon" sizes="180x180" href="\/assets\/input-kanban-apple-touch-icon\.png\?v=2" \/>/);
   assert.match(html, /<h1 class="brand"><img class="brand-icon" src="\/assets\/input-kanban-icon\.png"/);
-  assert.match(html, /<footer id="pageFooter" class="page-footer">版本：-<\/footer>/);
+  assert.match(html, /<footer class="page-footer"><div id="pageFooter">版本：-<\/div><div id="codexStatus" class="codex-status hidden"><\/div><\/footer>/);
   assert.match(html, /\.page-footer/);
   assert.match(script, /h\.version \? `版本：v\$\{h\.version\}` : '版本：未知（请重启服务）'/);
 });
@@ -28,7 +28,16 @@ test('sidebar header keeps a compact create action', () => {
   assert.doesNotMatch(html, /<button onclick="showCreateForm\(\)">新建任务批次<\/button>/);
 });
 
-test('create form exposes worker sandbox selector', () => {
+test('footer exposes codex backend status and create form exposes worker sandbox selector', () => {
+  assert.match(html, /id="codexStatus"/);
+  assert.match(html, /\.codex-status/);
+  assert.match(script, /async function loadCodexStatus\(\)/);
+  assert.match(script, /api\('\/api\/codex'\)/);
+  assert.match(script, /Codex 未安装/);
+  assert.match(script, /npm install -g @openai\/codex/);
+  assert.doesNotMatch(script, /Codex 可更新/);
+  assert.match(script, /codex\.versionText \|\| codex\.installedVersion \|\| 'codex'/);
+  assert.doesNotMatch(script, /后端命令 <code>/);
   assert.match(html, /<select id="workerSandbox">/);
   assert.match(html, /danger-full-access（高风险，跳过沙箱限制）/);
   assert.match(html, /这通常不是任务本身失败，而是当前沙箱能力不足/);
@@ -40,7 +49,23 @@ test('create form exposes worker sandbox selector', () => {
   assert.match(script, /localStorage\.getItem\(WORKER_SANDBOX_STORAGE_KEY\)/);
   assert.match(script, /select\.addEventListener\('change', saveWorkerSandboxPreference\)/);
   assert.match(script, /saveWorkerSandboxPreference\(\);\n  const body = \{ label: label\.value/);
-  assert.match(script, /api\(`\/api\/runs\/\$\{selectedRun\}\/plan`, \{ method: 'POST' \}\)/);
+  assert.match(html, /<div id="actionToolbar" class="toolbar"><\/div>/);
+  assert.match(html, /button\.state-pending/);
+  assert.match(html, /button\.state-active/);
+  assert.match(html, /@keyframes action-pulse/);
+  assert.match(html, /prefers-reduced-motion: reduce/);
+  assert.match(script, /let pendingAction = null/);
+  assert.match(script, /function renderActionToolbar\(\)/);
+  assert.match(script, /function runActionState\(key\)/);
+  assert.match(script, /async function runActionWithPending\(actionKey, fn\)/);
+  assert.match(script, /pendingAction === key/);
+  assert.match(script, /拆分中…/);
+  assert.match(script, /启动中…/);
+  assert.match(script, /验收中…/);
+  assert.match(script, /重试拆分/);
+  assert.match(script, /重试执行/);
+  assert.match(script, /重试验收/);
+  assert.match(script, /api\(`\/api\/runs\/\$\{selectedRun\}\/plan`, \{method:'POST'\}\)/);
   assert.doesNotMatch(script, /async function maybeAutoAdvanceRunSummaries/);
   assert.doesNotMatch(script, /await maybeAutoAdvanceRunSummaries\(latestRuns\)/);
   assert.doesNotMatch(script, /async function maybeAutoAdvanceSelectedRun/);

@@ -1,5 +1,23 @@
 # Release Notes
 
+## v0.0.13
+
+### Highlights
+
+- Harden Codex launching on Windows by resolving npm `codex.cmd` shims and explicit JavaScript launchers through a shared `resolveCodexLauncher()` adapter.
+- Use the shared Codex launcher path from the app-server client, headless runner, tmux runner, and Web footer Codex detection.
+- Add `/api/codex` and a compact Web footer Codex status that shows the backend-visible CLI version, for example `codex-cli 0.139.0`, without relying on npm registry `latest` by default.
+- Improve Web action feedback by turning run action buttons into lightweight state indicators: pending actions disable immediately, active backend states pulse subtly, and retry/done states use concise labels.
+- Keep `batch_blocked` runs discoverable via `input-kanban runs --active`, so agent/CLI auto loops can continue recoverable work instead of hiding blocked batches.
+- Make retry preparation atomic when selected tasks include a live process: no worker attempt is archived until all selected tasks are confirmed safe to retry.
+- Add Windows-focused regression coverage for Codex launcher resolution, app-server spawn failures, headless spawn failures, and tmux launcher quoting.
+
+### Verification
+
+- `npm run check` passed locally with 76 tests.
+- `npm run check` passed on the remote Windows validation host `zhangxing_win` with 76 tests after installing `@openai/codex` CLI.
+- Windows backend Codex detection returned `codex-cli 0.139.0` through `detectCodexInfo()`.
+
 ## v0.0.12
 
 ### Highlights

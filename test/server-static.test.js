@@ -20,6 +20,14 @@ test('server serves index.html at root and reports a valid app root', async () =
     const health = await healthResponse.json();
     assert.equal(healthResponse.status, 200);
     assert.equal(health.appRoot, process.cwd());
+    assert.equal(typeof health.codexBin, 'string');
+
+    const codexResponse = await fetch(`${baseUrl}/api/codex`);
+    const codex = await codexResponse.json();
+    assert.equal(codexResponse.status, 200);
+    assert.equal(codex.ok, true);
+    assert.equal(codex.codex.packageName, '@openai/codex');
+    assert.match(codex.codex.installCommand, /npm install -g @openai\/codex/);
   } finally {
     await instance.stop();
   }

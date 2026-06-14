@@ -8,7 +8,7 @@ const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-refresh-recov
 process.env.KANBAN_RUNS_DIR = tmp;
 process.env.KANBAN_RUNNER = 'tmux';
 
-const { refreshRun } = await import(`../src/orchestrator.js?refresh-recovery=${Date.now()}`);
+const { refreshRun, retryRun } = await import(`../src/orchestrator.js?refresh-recovery=${Date.now()}`);
 
 async function writeJson(file, value) {
   await fsp.mkdir(path.dirname(file), { recursive: true });
@@ -133,6 +133,37 @@ test('refreshRun recovers an unknown worker when its pid is still alive', async 
 
   assert.equal(state.tasks[0].status, 'running');
   assert.equal(state.status, 'running');
+});
+
+test('retryRun does not archive any worker when one selected task is still live', async () => {
+  const runId = 'run_retry_live_task_atomic';
+  const runDir = path.join(tmp, runId);
+  const firstWorkerDir = path.join(runDir, 'workers', 'T-01');
+  const liveWorkerDir = path.join(runDir, 'workers', 'T-02');
+  await fsp.mkdir(firstWorkerDir, { recursive: true });
+  await fsp.mkdir(liveWorkerDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'task.md'), 'retry should be atomic');
+  await fsp.writeFile(path.join(firstWorkerDir, 'stderr.log'), 'first failed');
+  const failedTask = { id: 'T-01', batchId: 'batch-1', name: 'first', prompt: 'first', sandbox: 'read-only', expectedArtifacts: [], status: 'failed', exitCode: 1 };
+  const liveTask = { id: 'T-02', batchId: 'batch-1', name: 'live', prompt: 'live', sandbox: 'read-only', expectedArtifacts: [], status: 'unknown', pid: process.pid };
+  await writeJson(path.join(runDir, 'run_state.json'), {
+    runId,
+    label: 'retry live task atomic',
+    repo: tmp,
+    maxParallel: 1,
+    runner: 'tmux',
+    status: 'batch_blocked',
+    createdAt: '2026-06-09T00:00:00.000Z',
+    updatedAt: '2026-06-09T00:00:00.000Z',
+    planner: { status: 'completed' },
+    batches: [{ id: 'batch-1', name: 'batch', maxParallel: 1, status: 'failed', tasks: [failedTask, liveTask] }],
+    tasks: [failedTask, liveTask],
+    judge: { status: 'pending' }
+  });
+
+  await assert.rejects(() => retryRun(runId), /task still has a live process: T-02/);
+  assert.equal(await fsp.readFile(path.join(firstWorkerDir, 'stderr.log'), 'utf8'), 'first failed');
+  await assert.rejects(() => fsp.access(path.join(runDir, 'worker_attempts', 'T-01', 'attempt-01')), { code: 'ENOENT' });
 });
 
 test('refreshRun recovers an unknown worker when exit_code arrives later', async () => {
