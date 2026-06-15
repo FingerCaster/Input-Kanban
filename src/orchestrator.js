@@ -500,6 +500,27 @@ async function rotatePlannerAttempt(state, runDir) {
   }];
 }
 
+async function rotateJudgeAttempt(state, runDir) {
+  const judgeDir = roleDir(runDir, 'judge');
+  if (!fs.existsSync(judgeDir)) return;
+  const attemptsDir = path.join(runDir, 'judge_attempts');
+  await ensureDir(attemptsDir);
+  const previousAttempts = (state.judgeAttempts || []).map(item => Number(item.attempt || 0)).filter(Number.isFinite);
+  const attempt = Number(state.judge?.attempt || 0) || Math.max(1, 1 + Math.max(0, ...previousAttempts));
+  const archivedDir = path.join(attemptsDir, `attempt-${String(attempt).padStart(2, '0')}`);
+  await fsp.rm(archivedDir, { recursive: true, force: true });
+  await fsp.rename(judgeDir, archivedDir);
+  state.judgeAttempts = [...(state.judgeAttempts || []), {
+    attempt,
+    status: state.judge?.status,
+    exitCode: state.judge?.exitCode ?? null,
+    startedAt: state.judge?.startedAt,
+    endedAt: state.judge?.endedAt,
+    archivedDir,
+    archivedAt: nowIso()
+  }];
+}
+
 async function rotateWorkerAttempt(state, task) {
   const runDir = pathForRun(state.runId);
   const workerDir = roleDir(runDir, 'worker', task.id);
@@ -792,16 +813,26 @@ export async function startJudge(runId) {
   return await withRunStateLock(runId, async () => {
     const state = await loadRun(runId);
     if (!state) throw new Error(`run not found: ${runId}`);
+    if (state.archived) throw new Error('archived run cannot be judged');
+    if (state.status === 'stopped') throw new Error('stopped run cannot be judged');
     recomputeRunStatus(state);
+    if (state.judge?.status === 'running') throw new Error('judge already running');
+    if (state.judge?.status === 'completed') throw new Error('judge already completed');
     if (!allBatchesCompleted(state) && state.tasks?.length) throw new Error('final judge is allowed only after all batches completed');
-    const outDir = roleDir(pathForRun(runId), 'judge');
+    const runDir = pathForRun(runId);
+    if (state.judge?.status === 'failed') await rotateJudgeAttempt(state, runDir);
+    const outDir = roleDir(runDir, 'judge');
     await ensureDir(outDir);
     const judgeInputPath = path.join(outDir, 'judge_input.json');
     const judgeInput = await buildJudgeInput(state);
     await writeJsonAtomic(judgeInputPath, judgeInput);
     const prompt = defaultJudgePrompt(state, judgeInputPath);
-    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(pathForRun(runId)), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
-    state.judge = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir };
+    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
+    const previousJudgeAttempts = [
+      ...(state.judgeAttempts || []).map(item => Number(item.attempt || 0)),
+      Number(state.judge?.attempt || 0)
+    ].filter(Number.isFinite);
+    state.judge = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir, attempt: 1 + Math.max(0, ...previousJudgeAttempts) };
     state.status = 'judging';
     await saveRun(state);
     child.onExit(async code => {

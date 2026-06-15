@@ -6,6 +6,54 @@ import vm from 'node:vm';
 const html = await fsp.readFile(new URL('../public/index.html', import.meta.url), 'utf8');
 const script = html.match(/<script>([\s\S]*)<\/script>/)?.[1] || '';
 
+function createFrontendHarness() {
+  const calls = [];
+  const elements = new Map();
+  const elementForId = id => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        id,
+        innerHTML: '',
+        textContent: '',
+        value: '',
+        classList: { add() {}, remove() {} },
+        setAttribute() {},
+        addEventListener() {}
+      });
+    }
+    return elements.get(id);
+  };
+  const context = {
+    console: { error() {} },
+    localStorage: { getItem() { return ''; }, setItem() {} },
+    performance: { now() { return 0; } },
+    setInterval() {},
+    setTimeout(fn) { if (typeof fn === 'function') fn(); },
+    requestAnimationFrame(fn) { if (typeof fn === 'function') fn(); },
+    alert(message) { calls.push({ kind: 'alert', message }); },
+    confirm() { calls.push({ kind: 'confirm' }); return true; },
+    calls,
+    fetch: async (requestPath, opts = {}) => {
+      calls.push({ kind: 'fetch', path: requestPath, opts });
+      return { ok: true, headers: { get: () => 'application/json' }, json: async () => ({}), text: async () => '' };
+    },
+    document: { getElementById: elementForId },
+    api: async (requestPath, opts = {}) => { calls.push({ kind: 'api', path: requestPath, opts }); return {}; },
+    refreshRuns: async () => { calls.push({ kind: 'refreshRuns' }); },
+    refreshSelected: async () => { calls.push({ kind: 'refreshSelected' }); }
+  };
+  const bootScript = script
+    .replace(/\ninitializeWorkerSandboxPreference\(\);\nrenderActionToolbar\(\);\nloadCodexStatus\(\)\.catch\(console\.error\);\nloadHealth\(\)\.then\(refreshRuns\);\nsetInterval\(\(\) => \{ if \(selectedRun\) refreshSelected\(\{auto:true\}\)\.catch\(console\.error\); else refreshRuns\(\)\.catch\(console\.error\); \}, AUTO_REFRESH_MS\);\s*$/, '');
+  vm.runInNewContext(`${bootScript}
+api = async (requestPath, opts = {}) => { calls.push({ kind: 'api', path: requestPath, opts }); return {}; };
+refreshSelected = async () => { calls.push({ kind: 'refreshSelected' }); };
+globalThis.__setRun = (runId, state) => { selectedRun = runId; currentState = state; };
+globalThis.__runActionState = runActionState;
+globalThis.__dispatchRun = dispatchRun;
+globalThis.__calls = calls;`, context);
+  return context;
+}
+
 test('public inline script remains parseable', () => {
   assert.ok(script.includes('function renderSelectedHeader()'));
   assert.doesNotThrow(() => new vm.Script(script));
@@ -65,6 +113,8 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /let pendingAction = null/);
   assert.match(script, /function renderActionToolbar\(\)/);
   assert.match(script, /function runActionState\(key\)/);
+  assert.doesNotMatch(script, /workers_completed/);
+  assert.doesNotMatch(script, /workers_failed/);
   assert.match(script, /async function runActionWithPending\(actionKey, fn\)/);
   assert.match(script, /pendingAction === key/);
   assert.match(script, /拆分中…/);
@@ -89,6 +139,40 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /await archiveRunById\(runId, \{ confirmFirst: false \}\)/);
   assert.match(script, /metaChip\('沙箱', sandbox/);
   assert.match(script, /danger: sandbox === 'danger-full-access'/);
+});
+
+test('run action state maps reachable statuses to executable actions', () => {
+  const harness = createFrontendHarness();
+
+  harness.__setRun('run_planned', { status: 'planned', tasks: [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.__runActionState('dispatch'))), { label: '执行', disabled: false, state: '' });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.__runActionState('judge'))), { label: '验收', disabled: true, state: 'done' });
+
+  harness.__setRun('run_gated', { status: 'planned', tasks: [], gates: { planApproval: { required: true, approved: false } } });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.__runActionState('dispatch'))), { label: '开始执行', disabled: false, state: '' });
+
+  harness.__setRun('run_blocked', { status: 'batch_blocked', tasks: [{ id: 'T-01', status: 'failed' }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.__runActionState('dispatch'))), { label: '重试执行', disabled: false, state: 'retry' });
+
+  harness.__setRun('run_completed', { status: 'batches_completed', tasks: [{ id: 'T-01', status: 'completed' }] });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.__runActionState('dispatch'))), { label: '已完成', disabled: true, state: 'done' });
+  assert.deepEqual(JSON.parse(JSON.stringify(harness.__runActionState('judge'))), { label: '验收', disabled: false, state: '' });
+});
+
+test('dispatch toolbar action retries blocked runs and dispatches planned runs', async () => {
+  const planned = createFrontendHarness();
+  planned.__setRun('run_planned', { status: 'planned', tasks: [] });
+  await planned.__dispatchRun();
+  assert.deepEqual(planned.__calls.filter(call => call.kind === 'api' && call.opts.method === 'POST').map(call => [call.path, call.opts.method]), [
+    ['/api/runs/run_planned/dispatch', 'POST']
+  ]);
+
+  const blocked = createFrontendHarness();
+  blocked.__setRun('run_blocked', { status: 'batch_blocked', tasks: [{ id: 'T-01', status: 'failed' }] });
+  await blocked.__dispatchRun();
+  assert.deepEqual(blocked.__calls.filter(call => call.kind === 'api' && call.opts.method === 'POST').map(call => [call.path, call.opts.method]), [
+    ['/api/runs/run_blocked/retry', 'POST']
+  ]);
 });
 
 test('workspace filter controls are present in the sidebar', () => {
@@ -192,6 +276,9 @@ test('task table has no tmux column or file-viewer tmux panel', () => {
   assert.doesNotMatch(script, /const tmuxHeader = isTmuxMode\(\)/);
   assert.doesNotMatch(script, /hideTmuxPanel/);
   assert.match(script, /<th>进程号\/退出码<\/th><th>Codex 会话ID<\/th><th>最终回复<\/th><th>操作<\/th>/);
+  assert.match(html, /th:nth-child\(6\), td:nth-child\(6\) \{ width: 116px; \}/);
+  assert.match(html, /\.session-cell-wrap \{ display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; \}/);
+  assert.match(script, /session-cell-wrap/);
 });
 
 test('file viewer renders role-specific file tabs', () => {

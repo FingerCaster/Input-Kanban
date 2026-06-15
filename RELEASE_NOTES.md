@@ -1,5 +1,23 @@
 # Release Notes
 
+## v0.0.15
+
+### Highlights
+
+- Absorb PR #3 recovery hardening without directly merging its older `v0.0.13` branch, preserving the `v0.0.14` Plan Approval Gate and Web layout changes.
+- Route blocked-run dashboard execution actions to `/api/runs/:id/retry`, so `batch_blocked` runs retry failed/unknown tasks instead of hitting the dispatch endpoint.
+- Remove stale Web `workers_completed` / `workers_failed` UI state handling now that backend run status uses `batches_completed` and `batch_blocked`.
+- Harden final judge starts: reject archived/stopped runs, duplicate running judges, and completed judges; failed judges are archived to `judge_attempts/` before retrying.
+- Add short `/api/codex` detection caching to avoid repeatedly spawning Codex detection during frequent dashboard refreshes.
+- Keep task-table Codex session IDs and their copy buttons on one line by widening the session column and using a compact inline layout.
+
+### Verification
+
+- `npm run check` passed locally with 84 tests.
+- `npm pack --dry-run` passed for `input-kanban@0.0.15`.
+- Windows release-candidate validation on `zhangxing_win` passed with 84 tests.
+- Windows Web smoke confirmed `/api/health`, `/api/codex`, Plan Approval UI, compact header copy tools, and one-line Codex session copy layout.
+
 ## v0.0.14
 
 ### Highlights

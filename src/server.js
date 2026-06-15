@@ -8,6 +8,8 @@ import { createRun, listRuns, startPlanner, dispatchRun, startJudge, refreshRun,
 import { startAutoScheduler } from './scheduler.js';
 
 const PUBLIC_DIR = path.join(APP_ROOT, 'public');
+const CODEX_INFO_TTL_MS = 30000;
+let codexInfoCache = null;
 
 function send(res, status, body, type = 'application/json') {
   const data = type === 'application/json' ? JSON.stringify(body, null, 2) : body;
@@ -25,6 +27,13 @@ async function readBody(req) {
 
 function notFound(res) { send(res, 404, { error: 'not found' }); }
 function methodNotAllowed(res) { send(res, 405, { error: 'method not allowed' }); }
+
+async function cachedCodexInfo(nowMs = Date.now()) {
+  if (codexInfoCache && codexInfoCache.expiresAt > nowMs) return codexInfoCache.value;
+  const value = await detectCodexInfo();
+  codexInfoCache = { value, expiresAt: nowMs + CODEX_INFO_TTL_MS };
+  return value;
+}
 
 async function serveStatic(req, res, pathname) {
   let file = pathname === '/' ? path.join(PUBLIC_DIR, 'index.html') : path.join(PUBLIC_DIR, pathname.replace(/^\/+/, ''));
@@ -46,7 +55,7 @@ async function handleApi(req, res, url, appClient) {
       return send(res, 200, { ok: true, version: PACKAGE_VERSION, appRoot: APP_ROOT, runsDir: RUNS_DIR, defaultWorkspace: DEFAULT_WORKSPACE, defaultRepo: DEFAULT_REPO, runner: RUNNER, codexBin: CODEX_BIN });
     }
     if (req.method === 'GET' && url.pathname === '/api/codex') {
-      return send(res, 200, { ok: true, codex: await detectCodexInfo() });
+      return send(res, 200, { ok: true, codex: await cachedCodexInfo() });
     }
     if (parts[1] === 'runs' && parts.length === 2) {
       if (req.method === 'GET') return send(res, 200, { runs: await listRuns({ includeArchived: url.searchParams.get('includeArchived') === '1', workspace: url.searchParams.get('workspace') || '' }) });

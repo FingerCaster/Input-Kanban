@@ -41,20 +41,20 @@
     @media (prefers-reduced-motion: reduce) { button, button.state-active, button.state-pending::after, .refresh-pulse-chip.pulse .refresh-pulse-dot { animation: none !important; transition: none !important; } }
     table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
     th, td { border-bottom: 1px solid var(--line); padding: 9px 8px; text-align: left; vertical-align: top; }
-    th:nth-child(1), td:nth-child(1) { width: 34%; }
+    th:nth-child(1), td:nth-child(1) { width: 32%; }
     th:nth-child(2), td:nth-child(2) { width: 92px; white-space: nowrap; }
     th:nth-child(3), td:nth-child(3) { width: 132px; }
     th:nth-child(4), td:nth-child(4) { width: 64px; white-space: nowrap; }
     th:nth-child(5), td:nth-child(5) { width: 96px; }
-    th:nth-child(6), td:nth-child(6) { width: 92px; }
+    th:nth-child(6), td:nth-child(6) { width: 116px; }
     th:nth-child(7), td:nth-child(7) { width: 66px; }
     th:nth-child(8), td:nth-child(8) { width: 94px; }
     th { color: #cbd5e1; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
     tr:hover { background: #162033; cursor: pointer; }
     .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: var(--gray); line-height: 1.3; }
-    .completed, .judged, .workers_completed, .planned, .batches_completed { background: var(--green); }
+    .completed, .judged, .planned, .batches_completed { background: var(--green); }
     .running, .planning, .judging { background: var(--blue); }
-    .failed, .workers_failed, .plan_failed, .judge_failed, .unknown, .batch_blocked { background: var(--red); }
+    .failed, .plan_failed, .judge_failed, .unknown, .batch_blocked { background: var(--red); }
     .plan_empty { background: var(--orange); }
     .pending, .created { background: var(--gray); }
     .batch-row td { border-top: 3px solid var(--line-strong); background: #101827; font-weight: 800; font-size: 14px; padding-top: 13px; }
@@ -117,7 +117,9 @@
     .run-card-title-actions { display: inline-flex; align-items: center; gap: 3px; }
     .archive-confirm-btn { min-width: 46px; padding: 4px 10px; border-color: rgba(248,113,113,.85); background: var(--red) !important; color: white; font-weight: 900; }
     .icon-svg { width: 14px; height: 14px; display: block; }
-    .session-cell { word-break: break-all; }
+    .session-cell-wrap { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .session-cell { min-width: 0; font-variant-numeric: tabular-nums; }
+    .session-cell-wrap .copy-btn { flex: 0 0 auto; margin-left: 0; }
     .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
     .row-actions .danger, .row-actions .secondary { margin: 0; }
     .status-stack { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 5px; }
@@ -273,7 +275,6 @@ function userFacingErrorMessage(error) {
 const statusText = {
   created: '已创建', pending: '等待中', planning: '拆分中', planned: '已拆分',
   running: '执行中', completed: '已完成', failed: '失败', unknown: '未知',
-  workers_completed: '子任务完成', workers_failed: '子任务失败',
   batches_completed: '批次完成', batch_blocked: '批次阻塞', plan_empty: '拆分为空', stopped: '已停止',
   judging: '验收中', judged: '已验收', plan_failed: '拆分失败', judge_failed: '验收失败'
 };
@@ -586,23 +587,22 @@ function runActionState(key) {
   const anyWorkerRunning = (currentState.tasks || []).some(t => t.status === 'running');
   if (key === 'plan') {
     if (status === 'planning' || currentState.planner?.status === 'running') return { label: '拆分中', disabled: true, state: 'active' };
-    if (status === 'planned' || status === 'running' || status === 'workers_completed' || status === 'batches_completed' || status === 'judging' || status === 'judged') return { label: '已拆分', disabled: true, state: 'done' };
+    if (status === 'planned' || status === 'running' || status === 'batches_completed' || status === 'judging' || status === 'judged') return { label: '已拆分', disabled: true, state: 'done' };
     if (status === 'plan_failed' || status === 'plan_empty') return { label: '重试拆分', disabled: false, state: 'retry' };
     return { label: '拆分', disabled: false, state: '' };
   }
   if (key === 'dispatch') {
     if (status === 'running' || anyWorkerRunning) return { label: '执行中', disabled: true, state: 'active' };
     if (status === 'planned') return { label: planApprovalPending() ? '开始执行' : '执行', disabled: false, state: '' };
-    if (status === 'batch_blocked') return { label: '执行', disabled: false, state: 'retry' };
-    if (status === 'workers_failed') return { label: '重试执行', disabled: false, state: 'retry' };
-    if (['workers_completed','batches_completed','judging','judged'].includes(status)) return { label: '已完成', disabled: true, state: 'done' };
+    if (status === 'batch_blocked') return { label: '重试执行', disabled: false, state: 'retry' };
+    if (['batches_completed','judging','judged'].includes(status)) return { label: '已完成', disabled: true, state: 'done' };
     return { label: '执行', disabled: true, state: 'done' };
   }
   if (key === 'judge') {
     if (status === 'judging' || currentState.judge?.status === 'running') return { label: '验收中', disabled: true, state: 'active' };
     if (status === 'judged') return { label: '已验收', disabled: true, state: 'done' };
     if (status === 'judge_failed') return { label: '重试验收', disabled: false, state: 'retry' };
-    if (status === 'batches_completed' || status === 'workers_completed') return { label: '验收', disabled: false, state: '' };
+    if (status === 'batches_completed') return { label: '验收', disabled: false, state: '' };
     return { label: '验收', disabled: true, state: 'done' };
   }
   if (key === 'stop') {
@@ -716,7 +716,7 @@ function shortSessionId(thread) {
 }
 function sessionCell(thread) {
   if (!thread) return '-';
-  return `<span class="session-cell" title="${esc(thread)}">…${esc(shortSessionId(thread))}</span><button class="copy-btn" title="复制完整 Codex 会话ID" onclick="copySessionId(event, '${esc(thread)}')">⧉</button>`;
+  return `<span class="session-cell-wrap"><span class="session-cell" title="${esc(thread)}">…${esc(shortSessionId(thread))}</span><button class="copy-btn" title="复制完整 Codex 会话ID" onclick="copySessionId(event, '${esc(thread)}')">⧉</button></span>`;
 }
 function taskStartedCell(t) {
   return t?.startedAt ? formatDateTime(t.startedAt) : '-';
@@ -1049,7 +1049,11 @@ async function renameRunLabel(event, runId = selectedRun) {
   });
 }
 async function planRun() { if (selectedRun) await runActionWithPending('plan', async () => { await api(`/api/runs/${selectedRun}/plan`, {method:'POST'}); await refreshSelected(); }); }
-async function dispatchRun() { if (selectedRun) await runActionWithPending('dispatch', async () => { await api(`/api/runs/${selectedRun}/dispatch`, {method:'POST'}); await refreshSelected(); }); }
+async function dispatchRun() {
+  if (!selectedRun) return;
+  const endpoint = currentState?.status === 'batch_blocked' ? 'retry' : 'dispatch';
+  await runActionWithPending('dispatch', async () => { await api(`/api/runs/${selectedRun}/${endpoint}`, {method:'POST'}); await refreshSelected(); });
+}
 async function judgeRun() { if (selectedRun) await runActionWithPending('judge', async () => { await api(`/api/runs/${selectedRun}/judge`, {method:'POST'}); await refreshSelected(); }); }
 async function stopSelectedRun() {
   if (!selectedRun) return;
