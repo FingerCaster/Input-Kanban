@@ -39,10 +39,18 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /codex\.versionText \|\| codex\.installedVersion \|\| 'codex'/);
   assert.doesNotMatch(script, /后端命令 <code>/);
   assert.match(html, /<select id="workerSandbox">/);
+  assert.match(html, /id="planApproval" type="checkbox"/);
+  assert.match(html, /计划生成后手动确认后执行/);
+  assert.match(html, /停在“已拆分，待确认”/);
   assert.match(html, /danger-full-access（高风险，跳过沙箱限制）/);
   assert.match(html, /这通常不是任务本身失败，而是当前沙箱能力不足/);
   assert.match(html, /DNS \/ 网络失败则通常需要检查代理、VPN 或本地 evidence/);
   assert.match(script, /workerSandbox: workerSandbox\.value/);
+  assert.match(script, /planApproval: planApproval\.checked/);
+  assert.match(script, /function planApprovalPending\(state = currentState\)/);
+  assert.match(script, /function runStatusLabel\(state = currentState\)/);
+  assert.match(script, /已拆分，待确认/);
+  assert.match(script, /开始执行/);
   assert.match(script, /const WORKER_SANDBOX_STORAGE_KEY = 'input-kanban\.workerSandbox'/);
   assert.match(script, /const VALID_WORKER_SANDBOXES = new Set\(\['read-only', 'workspace-write', 'danger-full-access'\]\)/);
   assert.match(script, /function initializeWorkerSandboxPreference\(\)/);
@@ -118,12 +126,25 @@ test('workspace filter controls are present in the sidebar', () => {
 test('selected run header uses compact metadata chips', () => {
   assert.match(html, /\.meta-chip/);
   assert.match(html, /\.run-card-meta/);
-  assert.match(script, /metaChip\('Run ID', currentState\.runId/);
+  assert.doesNotMatch(script, /metaChip\('Run ID', currentState\.runId/);
+  assert.match(html, /\.build-title \{ display: grid; grid-template-columns: minmax\(0, 1fr\) auto/);
+  assert.match(html, /\.build-title-tools/);
+  assert.match(script, /build-title-main/);
+  assert.match(script, /build-title-tools/);
+  assert.match(script, /title-copy-btn/);
+  assert.match(script, /data-copy-kind="run-id"/);
+  assert.match(script, /data-copy-kind="tmux"/);
+  assert.match(script, /function copyIcon\(\)/);
+  assert.match(script, /function titleCopyLabel\(kind\)/);
+  assert.match(script, /copyRunId\(event\)/);
+  assert.match(script, /复制 Run ID/);
   assert.match(script, /metaChip\('工作区', basenamePath\(currentState\.workspacePath \|\| currentState\.repo\)/);
   assert.match(script, /copyRepoPath\(event\)/);
   assert.match(script, /title="复制工作区地址"/);
   assert.match(script, /event\.currentTarget\.textContent = '⧉'/);
-  assert.match(script, /metaChip\('终端', tmuxSessionName\(currentState\)/);
+  assert.doesNotMatch(script, /metaChip\('终端', tmuxSessionName\(currentState\)/);
+  assert.doesNotMatch(script, /tmux 现场尚未生成/);
+  assert.match(script, /复制 tmux attach 指令/);
   assert.match(script, /metaChip\('用时', formatDurationMs\(durationSeconds\(currentState\.createdAt, runDurationEnd\(currentState\)\) \* 1000\)\)/);
   assert.match(script, /function runDurationEnd\(s\)/);
   assert.match(script, /terminalStatuses\.has\(s\.status\)/);
@@ -239,7 +260,7 @@ test('tmux generated badges are not shown in run/task panels', () => {
   assert.doesNotMatch(html, /tmux 已生成/);
   assert.doesNotMatch(html, /tmux-indicator/);
   assert.doesNotMatch(script, /tmuxIndicator/);
-  assert.match(script, /复制tmux attach指令/);
+  assert.match(script, /复制 tmux attach 指令/);
   assert.doesNotMatch(script, /复制 attach/);
 });
 

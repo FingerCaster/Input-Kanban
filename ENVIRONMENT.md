@@ -40,7 +40,7 @@ input-kanban \
 ## Notes
 
 - `KANBAN_DEFAULT_WORKSPACE` / `--workspace` should point to the local directory where work should run; `KANBAN_DEFAULT_REPO` / `--repo` remain compatibility aliases.
-- `input-kanban serve` starts a lightweight background scheduler that uses the same orchestrator auto-advance path as CLI `submit --auto` / `input-kanban auto <runId>`. It advances planned runs, serial batches, final judge startup, and bounded automatic retries without relying on an open browser tab.
+- `input-kanban serve` starts a lightweight background scheduler that uses the same orchestrator auto-advance path as CLI `submit --auto` / `input-kanban auto <runId>`. It advances planned runs, serial batches, final judge startup, and bounded automatic retries without relying on an open browser tab. If a run was created with `--plan-approval` / plan approval gate enabled, the scheduler stops after planning until the user confirms the plan.
 - `KANBAN_RUNNER` / `--runner tmux` runs Codex tasks inside tmux windows while keeping scheduling and status tracking in the Node.js orchestrator.
 - `KANBAN_RUNNER=tmux` is optional. Use it when you want live terminal visibility into planner, worker, and final judge sessions.
 - With `KANBAN_RUNNER=tmux`, stopping and restarting `input-kanban serve` does not interrupt already-running Codex sessions; tmux keeps them alive and the scheduler resumes after restart. Do not assume the same safety for `headless` runner child processes.

@@ -171,7 +171,7 @@ function parseSubmitArgs(argv) {
   const args = {
     host: '127.0.0.1', port: 8787, workspace: undefined, repo: undefined, runsDir: undefined, codexBin: undefined,
     runner: undefined, label: undefined, taskText: undefined, taskFile: undefined, maxParallel: 3,
-    workerSandbox: 'workspace-write', auto: true, detach: false, watch: true, json: false, pollMs: 3000, maxRetries: 1, help: false
+    workerSandbox: 'workspace-write', planApproval: false, auto: true, detach: false, watch: true, json: false, pollMs: 3000, maxRetries: 1, help: false
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -190,6 +190,7 @@ function parseSubmitArgs(argv) {
     else if (arg === '--task-file') args.taskFile = next();
     else if (arg === '--max-parallel') args.maxParallel = Number(next());
     else if (arg === '--worker-sandbox') args.workerSandbox = validateSandbox(next(), '--worker-sandbox');
+    else if (arg === '--plan-approval') args.planApproval = true;
     else if (arg === '--auto') { args.auto = true; args.watch = true; }
     else if (arg === '--no-auto') { args.auto = false; args.watch = false; }
     else if (arg === '--detach' || arg === '-d') args.detach = true;
@@ -290,6 +291,7 @@ Submit options:
   --task-file <path>         Read task description from file, use - for stdin
   --max-parallel <n>         Default max parallel workers, default 3
   --worker-sandbox <mode>    read-only, workspace-write, or danger-full-access
+  --plan-approval            Pause after planning until the generated plan is confirmed
   --runner <mode>            Runner mode: headless or tmux
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --auto                     Plan, dispatch all batches, judge, and watch, default for submit
@@ -318,6 +320,7 @@ Options:
   --task-file <path>         Read task description from file, use - for stdin
   --max-parallel <n>         Default max parallel workers, default 3
   --worker-sandbox <mode>    read-only, workspace-write, or danger-full-access
+  --plan-approval            Pause after planning until the generated plan is confirmed
   --runner <mode>            Runner mode: headless or tmux
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --auto                     Plan, dispatch all batches, judge, and watch, default for submit
@@ -735,7 +738,8 @@ async function submit(args) {
     workspace: process.env.KANBAN_DEFAULT_WORKSPACE || process.env.KANBAN_DEFAULT_REPO,
     repo: process.env.KANBAN_DEFAULT_REPO,
     maxParallel: args.maxParallel,
-    workerSandbox: args.workerSandbox
+    workerSandbox: args.workerSandbox,
+    planApproval: args.planApproval
   });
   if (!args.json) {
     console.log(`已创建任务批次: ${state.runId}`);

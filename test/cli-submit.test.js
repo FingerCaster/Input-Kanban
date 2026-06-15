@@ -271,11 +271,14 @@ test('CLI exposes submit auto loop without replacing serve mode', () => {
   assert.match(cli, /input-kanban retry <runId> \[taskId\]/);
   assert.match(cli, /await retryRun\(args\.runId/);
   assert.match(cli, /input-kanban submit \[options\]/);
+  assert.match(cli, /--plan-approval\s+Pause after planning until the generated plan is confirmed/);
   assert.match(cli, /--auto\s+Plan, dispatch all batches, judge, and watch, default for submit/);
   assert.match(cli, /--no-auto\s+Only create the run and start planning/);
   assert.match(cli, /Task batch name, default generated from task text/);
   assert.match(cli, /-d, --detach\s+Run the default auto loop in a background supervisor/);
-  assert.match(cli, /auto: true, detach: false, watch: true/);
+  assert.match(cli, /planApproval: false, auto: true, detach: false, watch: true/);
+  assert.match(cli, /arg === '--plan-approval'/);
+  assert.match(cli, /planApproval: args\.planApproval/);
   assert.match(cli, /async function autoRun\(args\)/);
   assert.match(cli, /function startDetachedAuto\(runId, args\)/);
   assert.match(cli, /async function result\(args\)/);

@@ -11,7 +11,7 @@ await fsp.chmod(codexStub, 0o755);
 process.env.KANBAN_RUNS_DIR = tmp;
 process.env.KANBAN_RUNNER = 'headless';
 process.env.KANBAN_CODEX_BIN = codexStub;
-const { refreshRun, autoAdvanceRun, stopRun } = await import(`../src/orchestrator.js?headless-status=${Date.now()}`);
+const { refreshRun, autoAdvanceRun, stopRun, dispatchRun } = await import(`../src/orchestrator.js?headless-status=${Date.now()}`);
 
 async function writeRunState({ runId, startedAt, status = 'completed' }) {
   const runDir = path.join(tmp, runId);
@@ -62,6 +62,43 @@ test('headless task without tmux metadata does not get manual attention hint', a
 
   const state = await refreshRun('run_headless_attention');
   assert.equal(state.tasks[0].attentionHint, undefined);
+});
+
+test('autoAdvanceRun stops at an unapproved plan approval gate', async () => {
+  const runId = 'run_auto_advance_plan_gate';
+  const runDir = path.join(tmp, runId);
+  await fsp.mkdir(path.join(runDir, 'planner'), { recursive: true });
+  await fsp.mkdir(path.join(runDir, 'judge'), { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'task.md'), 'task');
+  const pendingTask = { id: 'T-01', name: 'Worker', batchId: 'batch-1', prompt: 'work', sandbox: 'workspace-write', expectedArtifacts: [], status: 'pending' };
+  await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
+    runId,
+    label: 'auto advance plan gate',
+    repo: tmp,
+    runner: 'headless',
+    maxParallel: 1,
+    workerSandbox: 'workspace-write',
+    gates: { planApproval: { required: true, approved: false, approvedAt: null, approvedBy: null } },
+    status: 'planned',
+    createdAt: '2026-06-08T00:00:00.000Z',
+    updatedAt: '2026-06-08T00:00:00.000Z',
+    planner: { status: 'completed' },
+    judge: { status: 'pending' },
+    batches: [{ id: 'batch-1', status: 'pending', maxParallel: 1, tasks: [pendingTask] }],
+    tasks: [pendingTask]
+  }, null, 2));
+
+  const gated = await autoAdvanceRun(runId);
+  assert.equal(gated.status, 'planned');
+  assert.equal(gated.tasks[0].status, 'pending');
+  assert.equal(gated.gates.planApproval.approved, false);
+
+  const dispatched = await dispatchRun(runId);
+  assert.equal(dispatched.gates.planApproval.approved, true);
+  assert.ok(dispatched.gates.planApproval.approvedAt);
+  assert.equal(dispatched.status, 'running');
+  assert.equal(dispatched.tasks[0].status, 'running');
+  await stopRun(runId, { reason: 'test cleanup' });
 });
 
 test('autoAdvanceRun dispatches planned runs through the shared orchestrator path', async () => {

@@ -1,5 +1,23 @@
 # Release Notes
 
+## v0.0.14
+
+### Highlights
+
+- Add a durable Plan Approval Gate: runs can now pause after planning until the generated plan is manually confirmed.
+- Add `input-kanban submit --plan-approval`, which lets auto advance through planning and then stop at the unapproved plan gate instead of dispatching workers immediately.
+- Make `dispatchRun()` confirm the plan gate before starting workers, so Web `开始执行` means “approve this plan and continue execution.”
+- Clarify auto semantics in docs: auto advances to completion, failure, or the first unapproved gate; `--no-auto` is not a durable scheduler gate.
+- Update the Web create form wording to `计划生成后手动确认后执行` and show planned gated runs as `已拆分，待确认`.
+- Rework the run detail header layout: keep title/status on the left, move `Run ID ⧉` and `tmux ⧉` copy tools to a lightweight right-side tool group, and keep long unreadable IDs out of metadata chips.
+- Record the Agent Profile / Candidate / Reviewer design direction in the private KB while keeping the current executor Codex-only.
+
+### Verification
+
+- `npm run check` passed locally with 78 tests.
+- `npm run check` passed on the remote Windows validation host `zhangxing_win` with 78 tests for the release-candidate working tree.
+- Windows Web smoke confirmed the plan approval input, compact title copy tools, `/api/health`, and `/api/codex`.
+
 ## v0.0.13
 
 ### Highlights

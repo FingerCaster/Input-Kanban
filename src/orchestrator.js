@@ -220,8 +220,28 @@ function deriveRunLabel(label, taskText) {
   return truncateDisplayWidth(cleaned, MAX_DERIVED_LABEL_DISPLAY_WIDTH) || 'task';
 }
 
+function normalizePlanApprovalGate(value = false) {
+  const required = !!value;
+  return { required, approved: !required, approvedAt: null, approvedBy: null };
+}
 
-export async function createRun({ label = '', taskText = '', workspace = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write' } = {}) {
+function planApprovalGate(state) {
+  return state?.gates?.planApproval || { required: false, approved: true, approvedAt: null, approvedBy: null };
+}
+
+function requiresPlanApproval(state) {
+  const gate = planApprovalGate(state);
+  return !!gate.required && !gate.approved;
+}
+
+function approvePlanGate(state, approvedBy = 'local-user') {
+  const gate = planApprovalGate(state);
+  if (!gate.required || gate.approved) return false;
+  state.gates = { ...(state.gates || {}), planApproval: { ...gate, approved: true, approvedAt: nowIso(), approvedBy } };
+  return true;
+}
+
+export async function createRun({ label = '', taskText = '', workspace = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write', planApproval = false, requiresPlanApproval = false } = {}) {
   const resolvedWorkspace = await assertWorkspacePath(workspace || repo || DEFAULT_WORKSPACE);
   const workspaceMeta = await detectWorkspaceMetadata(resolvedWorkspace);
   const runLabel = deriveRunLabel(label, taskText);
@@ -243,6 +263,7 @@ export async function createRun({ label = '', taskText = '', workspace = '', rep
     repo: resolvedWorkspace,
     maxParallel: Number(maxParallel) || 3,
     workerSandbox: normalizeSandbox(workerSandbox),
+    gates: { planApproval: normalizePlanApprovalGate(planApproval || requiresPlanApproval) },
     runner: RUNNER,
     status: 'created', createdAt: nowIso(), updatedAt: nowIso(),
     planner: { status: 'pending' }, batches: [], tasks: [], judge: { status: 'pending' }
@@ -580,6 +601,7 @@ export async function dispatchRun(runId) {
     if (!state.tasks?.length) throw new Error('no tasks in plan');
     if (state.status === 'batch_blocked') throw new Error('current batch is blocked by failed/unknown tasks');
     if (allBatchesCompleted(state)) throw new Error('all batches completed; run final judge next');
+    approvePlanGate(state);
     state.status = 'running';
     await scheduleMoreWorkers(state);
     recomputeRunStatus(state);
@@ -816,6 +838,7 @@ export async function autoAdvanceRun(runId, { appClient = null, startCreated = f
     return await refreshRun(runId, appClient) || state;
   }
   if (state.status === 'planned') {
+    if (requiresPlanApproval(state)) return state;
     try { state = await dispatchRun(runId); }
     catch (error) { if (!/all batches completed|current batch is blocked/i.test(error.message || '')) throw error; }
     return await refreshRun(runId, appClient) || state;
@@ -1230,7 +1253,7 @@ export function summaryOfRun(s) {
   const tasks = s.tasks || [];
   const workspacePath = s.workspacePath || s.repo || '';
   const git = s.git || s.workspace?.git || null;
-  return { runId: s.runId, label: s.label, repo: s.repo || workspacePath, workspacePath, workspaceName: s.workspaceName || path.basename(workspacePath || ''), git, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
+  return { runId: s.runId, label: s.label, repo: s.repo || workspacePath, workspacePath, workspaceName: s.workspaceName || path.basename(workspacePath || ''), git, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', gates: s.gates || {}, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
 }
 
 export async function readRunTaskText(runId) {

@@ -56,7 +56,15 @@ input-kanban submit --task "修复登录问题，并补充回归测试" --label 
 
 `submit` 默认会创建任务批次、发起拆分、自动派发所有批次，并在全部完成后自动发起最终验收。默认 workspace 是当前目录；如果不传 `--label`，任务批次名称会从任务内容自动生成。它使用同一个 runs 目录，所以只要 8787 Web 看板也使用相同的 `--runs-dir`，CLI 创建的任务会在 Web 界面里可见。
 
-`input-kanban serve` 会启动一个轻量后台 scheduler，持续刷新并推进未完成的 run：plan ready 后派发 batch、串行 batch 完成后启动下一批、全部 batch 完成后启动 final judge。CLI `submit --auto` / `input-kanban auto <runId>` 与 Web server 共用同一套 orchestrator 自动推进逻辑，因此任务推进不再依赖浏览器页面是否打开或刷新。
+如果希望 Planner 拆分完成后先看一眼计划，再放行执行，可以加计划确认 Gate：
+
+```bash
+input-kanban submit --task-file task.md --plan-approval
+```
+
+开启后，auto 会推进到 Planner 完成并停在“已拆分，待确认”；用户在 Web 上点一次“开始执行”即确认计划，随后 worker 批次和 final judge 继续自动推进。
+
+`input-kanban serve` 会启动一个轻量后台 scheduler，持续刷新并推进未完成的 run：plan ready 后派发 batch、串行 batch 完成后启动下一批、全部 batch 完成后启动 final judge。CLI `submit --auto` / `input-kanban auto <runId>` 与 Web server 共用同一套 orchestrator 自动推进逻辑，因此任务推进不再依赖浏览器页面是否打开或刷新。若 run 配置了计划确认 Gate，auto/scheduler 会停在该 Gate，不会越过未确认的计划。
 
 如果希望提交后立即返回，让任务在后台自动执行，可以加 `-d` / `--detach`：
 

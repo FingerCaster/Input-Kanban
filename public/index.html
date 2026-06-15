@@ -91,8 +91,11 @@
     .run-card-meta .meta-chip { padding: 4px 7px; font-size: 11px; }
     .run-card-meta .meta-chip.long .meta-value { max-width: 248px; }
     .build-header { border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: var(--panel-2); margin-bottom: 14px; }
-    .build-title { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 900; }
-    .build-meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+    .build-title { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 22px; font-weight: 900; }
+    .build-title-main { min-width: 0; display: flex; align-items: center; gap: 10px; }
+    .build-title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .build-title-tools { display: inline-flex; align-items: center; gap: 6px; justify-self: end; }
+    .build-meta { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
     .meta-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 5px 8px; border: 1px solid var(--line); border-radius: 999px; background: #020617; color: #cbd5e1; font-size: 12px; line-height: 1.2; }
     .meta-chip.danger { border-color: #f97316; color: #fed7aa; background: rgba(180,83,9,.14); }
     .meta-label { color: var(--muted); font-weight: 800; white-space: nowrap; }
@@ -106,6 +109,9 @@
     .log-panel { margin-top: 16px; }
     .file-tabs button { font-size: 13px; }
     .copy-btn { padding: 2px 6px; margin: 0 0 0 6px; border-radius: 6px; font-size: 12px; line-height: 1.2; background: var(--gray); vertical-align: middle; }
+    .title-copy-btn { display: inline-flex; align-items: center; gap: 5px; opacity: .78; font-size: 12px; padding: 5px 8px; margin: 0; }
+    .title-copy-btn:hover, .title-copy-btn:focus { opacity: 1; }
+    .title-copy-btn .icon-svg { width: 12px; height: 12px; }
     .rename-btn { opacity: 0; pointer-events: none; transition: opacity .15s ease; }
     .run-card:hover .rename-btn, .run-card:focus-within .rename-btn, .build-title:hover .rename-btn, .build-title:focus-within .rename-btn, .rename-btn:focus { opacity: 1; pointer-events: auto; }
     .run-card-title-actions { display: inline-flex; align-items: center; gap: 3px; }
@@ -169,6 +175,8 @@
         <option value="danger-full-access">danger-full-access（高风险，跳过沙箱限制）</option>
       </select>
       <div class="muted">仅影响 worker；任务拆分和汇总验收仍保持 read-only。若执行过程提示 Permission denied / sandbox denied，这通常不是任务本身失败，而是当前沙箱能力不足；在可信工作区可改用 danger-full-access。DNS / 网络失败则通常需要检查代理、VPN 或本地 evidence。</div>
+      <label><input id="planApproval" type="checkbox" style="width:auto; margin-right:6px;" />计划生成后手动确认后执行</label>
+      <div class="muted">开启后会停在“已拆分，待确认”；点击“开始执行”后继续自动执行到验收。</div>
       <label>任务说明</label><textarea id="taskText" placeholder="粘贴任务说明"></textarea>
       <div class="toolbar">
         <button onclick="createRun()">创建批次</button>
@@ -273,6 +281,9 @@ const roleText = { planner: '任务拆分', judge: '汇总验收' };
 function displayStatus(s) { return statusText[s] || s || '-'; }
 function displayRole(s) { return roleText[s] || s || '-'; }
 function pill(s) { return `<span class="pill ${s || ''}">${displayStatus(s)}</span>`; }
+function planApprovalPending(state = currentState) { return !!(state?.gates?.planApproval?.required && !state.gates.planApproval.approved); }
+function runStatusLabel(state = currentState) { return planApprovalPending(state) ? '已拆分，待确认' : displayStatus(state?.status); }
+function statusPill(state = currentState) { return `<span class="pill ${state?.status || ''}">${esc(runStatusLabel(state))}</span>`; }
 function esc(s) { return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
 function formatDateTime(s) {
   if (!s) return '-';
@@ -313,6 +324,12 @@ function metaChip(label, value, { title = value, danger = false, long = false, e
 function gitChip() { return '<span class="meta-chip" title="Git 工作区"><span class="meta-value">Git</span></span>'; }
 function editIcon() {
   return '<svg class="icon-svg" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 16.5V20h3.5L18.1 9.4l-3.5-3.5L4 16.5Z" fill="currentColor"/><path d="m16 4.5 3.5 3.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+}
+function copyIcon() {
+  return '<svg class="icon-svg" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M8 8h11v11H8V8Z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 16H4V4h12v1" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+}
+function titleCopyLabel(kind) {
+  return kind === 'tmux' ? `<span>tmux</span>${copyIcon()}` : `<span>Run ID</span>${copyIcon()}`;
 }
 function archiveIcon() {
   return '<svg class="icon-svg" viewBox="0 0 24 24" focusable="false" aria-hidden="true"><path d="M4 5h16v4H4V5Z" fill="currentColor"/><path d="M6 10h12v9H6v-9Z" fill="currentColor" opacity=".72"/><path d="M9 13h6" stroke="#020617" stroke-width="2" stroke-linecap="round"/></svg>';
@@ -407,7 +424,7 @@ function initializeWorkerSandboxPreference() {
 }
 async function createRun() {
   saveWorkerSandboxPreference();
-  const body = { label: label.value, workspace: repo.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, taskText: taskText.value };
+  const body = { label: label.value, workspace: repo.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, planApproval: planApproval.checked, taskText: taskText.value };
   const r = await api('/api/runs', { method: 'POST', body: JSON.stringify(body) });
   selectedRun = r.runId; selectedTask = null; selectedFileName = null;
   clearFileView();
@@ -444,7 +461,7 @@ function renderRunList() {
   const visibleRuns = latestRuns.slice(0, runListVisibleCount);
   const cards = visibleRuns.map(r => `
     <div class="run-card ${selectedRun === r.runId ? 'active' : ''}" onclick="selectRun('${r.runId}')" onmouseleave="clearArchiveConfirm('${r.runId}')">
-      <div class="run-card-title"><span class="run-card-name-wrap"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><span class="run-card-title-actions"><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, '${r.runId}')">${editIcon()}</button><button class="secondary copy-btn rename-btn ${pendingArchiveRunId === r.runId ? 'archive-confirm-btn' : ''}" title="${pendingArchiveRunId === r.runId ? '再次点击确认归档' : '归档任务批次（运行中请先停止）'}" onclick="archiveRunFromCard(event, '${r.runId}')">${pendingArchiveRunId === r.runId ? '确认' : archiveIcon()}</button></span></span><span>${pill(r.status)}</span></div>
+      <div class="run-card-title"><span class="run-card-name-wrap"><span class="run-card-name" title="${esc(r.label)}">${esc(r.label)}</span><span class="run-card-title-actions"><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, '${r.runId}')">${editIcon()}</button><button class="secondary copy-btn rename-btn ${pendingArchiveRunId === r.runId ? 'archive-confirm-btn' : ''}" title="${pendingArchiveRunId === r.runId ? '再次点击确认归档' : '归档任务批次（运行中请先停止）'}" onclick="archiveRunFromCard(event, '${r.runId}')">${pendingArchiveRunId === r.runId ? '确认' : archiveIcon()}</button></span></span><span>${statusPill(r)}</span></div>
       <div class="run-card-meta">
         ${metaChip('工作区', basenamePath(r.workspacePath || r.repo), { title: r.workspacePath || r.repo, long: true, extra: `<button class="secondary copy-btn" title="复制工作区地址" onclick="copyRunRepoPath(event, '${r.runId}')">⧉</button>` })}
         ${r.git?.isGit ? gitChip() : ''}
@@ -522,8 +539,11 @@ async function refreshSelected({auto=false} = {}) {
 function renderSelectedHeader() {
   if (!currentState) return '<div class="muted">未选择任务批次</div>';
   const sandbox = currentState.workerSandbox || 'workspace-write';
+  const titleActions = [`<button class="secondary copy-btn title-copy-btn" title="复制 Run ID：${esc(currentState.runId)}" data-copy-kind="run-id" onclick="copyRunId(event)">${titleCopyLabel('run-id')}</button>`];
+  if (currentState.runner === 'tmux' && hasRunTmuxMetadata(currentState)) {
+    titleActions.push(`<button class="secondary copy-btn title-copy-btn" title="复制 tmux attach 指令" data-copy-kind="tmux" onclick="copyTmuxRunCommand(event)">${titleCopyLabel('tmux')}</button>`);
+  }
   const chips = [
-    metaChip('Run ID', currentState.runId, { long: true }),
     metaChip('工作区', basenamePath(currentState.workspacePath || currentState.repo), {
       title: currentState.workspacePath || currentState.repo,
       long: true,
@@ -536,18 +556,8 @@ function renderSelectedHeader() {
   if (currentState.git?.isGit || currentState.workspace?.git?.isGit) {
     chips.push(gitChip());
   }
-  if (currentState.runner === 'tmux') {
-    if (hasRunTmuxMetadata(currentState)) {
-      chips.push(metaChip('终端', tmuxSessionName(currentState), {
-        long: true,
-        extra: `<button class="secondary copy-btn" onclick="copyTmuxRunCommand(event)">复制tmux attach指令</button>`
-      }));
-    } else {
-      chips.push(metaChip('终端', 'tmux 现场尚未生成'));
-    }
-  }
   chips.push(refreshPulseChip());
-  return `<div class="build-title"><span>${esc(currentState.label)}</span><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, currentState.runId)">${editIcon()}</button>${pill(currentState.status)}</div><div class="build-meta">${chips.join('')}</div>`;
+  return `<div class="build-title"><div class="build-title-main"><span class="build-title-text">${esc(currentState.label)}</span><button class="secondary copy-btn rename-btn" title="修改任务批次名称" onclick="renameRunLabel(event, currentState.runId)">${editIcon()}</button>${statusPill(currentState)}</div><div class="build-title-tools">${titleActions.join('')}</div></div><div class="build-meta">${chips.join('')}</div>`;
 }
 async function loadTaskDescription() {
   if (!selectedRun) { document.getElementById('taskDescription').textContent = '未选择任务批次'; return; }
@@ -582,7 +592,8 @@ function runActionState(key) {
   }
   if (key === 'dispatch') {
     if (status === 'running' || anyWorkerRunning) return { label: '执行中', disabled: true, state: 'active' };
-    if (status === 'planned' || status === 'batch_blocked') return { label: '执行', disabled: false, state: status === 'batch_blocked' ? 'retry' : '' };
+    if (status === 'planned') return { label: planApprovalPending() ? '开始执行' : '执行', disabled: false, state: '' };
+    if (status === 'batch_blocked') return { label: '执行', disabled: false, state: 'retry' };
     if (status === 'workers_failed') return { label: '重试执行', disabled: false, state: 'retry' };
     if (['workers_completed','batches_completed','judging','judged'].includes(status)) return { label: '已完成', disabled: true, state: 'done' };
     return { label: '执行', disabled: true, state: 'done' };
@@ -844,6 +855,19 @@ function hideExecutionSummary() {
   el.classList.add('hidden');
   el.innerHTML = '';
 }
+async function copyRunId(event) {
+  event.stopPropagation();
+  const runId = currentState?.runId || selectedRun || '';
+  if (!runId) return;
+  try {
+    await navigator.clipboard.writeText(runId);
+    const kind = event.currentTarget.dataset.copyKind || 'run-id';
+    event.currentTarget.textContent = '✓';
+    setTimeout(() => { event.currentTarget.innerHTML = titleCopyLabel(kind); }, 900);
+  } catch {
+    prompt('复制 Run ID', runId);
+  }
+}
 async function copyRepoPath(event, repoPath = currentState?.workspacePath || currentState?.repo || '') {
   event.stopPropagation();
   if (!repoPath) return;
@@ -864,9 +888,10 @@ async function copyTmuxRunCommand(event) {
   const command = runAttachCommand(currentState);
   if (!command) return;
   try {
+    const kind = event.currentTarget.dataset.copyKind || 'tmux';
     await navigator.clipboard.writeText(command);
-    event.currentTarget.textContent = '已复制';
-    setTimeout(() => { event.currentTarget.textContent = '复制tmux attach指令'; }, 900);
+    event.currentTarget.textContent = '✓';
+    setTimeout(() => { event.currentTarget.innerHTML = titleCopyLabel(kind); }, 900);
   } catch {
     prompt('复制 tmux attach 命令', command);
   }

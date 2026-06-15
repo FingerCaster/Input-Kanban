@@ -33,6 +33,16 @@ test('createRun stores default worker sandbox', async () => {
   assert.equal(state.workerSandbox, 'workspace-write');
 });
 
+test('createRun stores optional plan approval gate', async () => {
+  const open = await createRun({ label: 'open gate', repo, taskText: 'noop' });
+  assert.deepEqual(open.gates.planApproval, { required: false, approved: true, approvedAt: null, approvedBy: null });
+
+  const gated = await createRun({ label: 'plan gate', repo, taskText: 'noop', planApproval: true });
+  assert.equal(gated.gates.planApproval.required, true);
+  assert.equal(gated.gates.planApproval.approved, false);
+  assert.equal(gated.gates.planApproval.approvedAt, null);
+});
+
 test('createRun stores explicit danger-full-access worker sandbox', async () => {
   const state = await createRun({ label: 'danger sandbox', repo, taskText: 'noop', workerSandbox: 'danger-full-access' });
   assert.equal(state.workerSandbox, 'danger-full-access');

@@ -121,6 +121,7 @@ Supported submit options:
 --task-file <path|->
 --max-parallel <n>
 --worker-sandbox <read-only|workspace-write|danger-full-access>
+--plan-approval
 --runner <headless|tmux>
 --runs-dir <path>
 --auto
@@ -130,7 +131,7 @@ Supported submit options:
 --poll-ms <ms>
 ```
 
-`input-kanban submit` creates a run and starts the planner. Task content can come from `--task <text>` or `--task-file <path|->`; omitting `--workspace` uses the current working directory as the target workspace, and `--repo` remains a compatibility alias. Omitting `--label` derives the run label from the first non-empty task line. Auto mode is the default for submit: it keeps polling the run through the shared orchestrator auto-advance path, dispatches batches when the plan is ready, and starts the final judge once all batches complete. `--no-auto` keeps submit to create + plan only. `-d` / `--detach` starts a background supervisor process for the same auto loop and lets the submitting terminal return immediately. The Web server also starts a lightweight scheduler that uses this shared path, so serial batch advancement does not depend on an open browser tab. The submit output includes `input-kanban status <runId> --watch` for terminal-side observation. Because it writes to the same runs directory as the Web server, CLI-created runs are visible in the 8787 dashboard when both processes use the same `--runs-dir`.
+`input-kanban submit` creates a run and starts the planner. Task content can come from `--task <text>` or `--task-file <path|->`; omitting `--workspace` uses the current working directory as the target workspace, and `--repo` remains a compatibility alias. Omitting `--label` derives the run label from the first non-empty task line. Auto mode is the default for submit: it keeps polling the run through the shared orchestrator auto-advance path, dispatches batches when the plan is ready, and starts the final judge once all batches complete. `--plan-approval` adds a durable Planner → Worker gate: auto advances through planning, then pauses at the completed plan until the user confirms it from the Web dashboard by clicking `开始执行`. `--no-auto` keeps submit to create + plan only for the current CLI process, but a running Web server scheduler can still advance the run unless a durable gate such as `--plan-approval` is configured. `-d` / `--detach` starts a background supervisor process for the same auto loop and lets the submitting terminal return immediately. The Web server also starts a lightweight scheduler that uses this shared path, so serial batch advancement does not depend on an open browser tab. The submit output includes `input-kanban status <runId> --watch` for terminal-side observation. Because it writes to the same runs directory as the Web server, CLI-created runs are visible in the 8787 dashboard when both processes use the same `--runs-dir`.
 
 Default behavior:
 
@@ -160,8 +161,8 @@ Key points:
 - `result` prefers `judge/verdict.json` and falls back to `judge/last_message.md`; `--copy` copies the result to the clipboard.
 - `stop` requires an explicit `runId` and uses the same stop path as the Web dashboard.
 - `retry` retries failed/unknown workers while preserving the failed attempt directory.
-- `submit` defaults to auto mode: planner -> dispatch -> final judge, with one automatic retry for `batch_blocked` by default. `--no-auto` keeps create + plan only, and `-d/--detach` moves the auto loop to a background supervisor.
-- The Web dashboard now follows the same default auto behavior while the page is open: after planning it auto-dispatches planned runs and auto-starts the final judge once all batches complete.
+- `submit` defaults to auto mode: planner -> dispatch -> final judge, with one automatic retry for `batch_blocked` by default. `--plan-approval` changes this to planner -> wait for plan confirmation -> dispatch -> final judge. `--no-auto` keeps create + plan only for the CLI process, and `-d/--detach` moves the auto loop to a background supervisor.
+- The Web server scheduler follows the same shared auto behavior: after planning it auto-dispatches planned runs and auto-starts the final judge once all batches complete, unless a plan approval gate is required and still unapproved.
 
 Example agent loop:
 
