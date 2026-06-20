@@ -1,6 +1,8 @@
 import http from 'node:http';
+import { execFile } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { CodexAppServerClient } from './appServerClient.js';
 import { APP_ROOT, CODEX_BIN, DEFAULT_WORKSPACE, DEFAULT_REPO, PACKAGE_VERSION, RUNNER, RUNS_DIR, detectCodexInfo } from './utils.js';
@@ -9,6 +11,7 @@ import { startAutoScheduler } from './scheduler.js';
 
 const PUBLIC_DIR = path.join(APP_ROOT, 'public');
 const CODEX_INFO_TTL_MS = 30000;
+const execFileAsync = promisify(execFile);
 let codexInfoCache = null;
 
 function send(res, status, body, type = 'application/json') {
@@ -35,6 +38,150 @@ async function cachedCodexInfo(nowMs = Date.now()) {
   return value;
 }
 
+function threadTimeValue(thread, keys) {
+  for (const key of keys) {
+    const value = thread?.[key];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return '';
+}
+
+function hasAppServerThreadMarkers(thread) {
+  const preview = String(thread?.preview || '');
+  return preview.includes('ORCHESTRATOR_RUN_ID: ') && preview.includes('ORCHESTRATOR_TASK_ID: ');
+}
+
+function previewThreadTitle(preview) {
+  const lines = String(preview || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  for (const line of lines) {
+    if (/^ORCHESTRATOR_[A-Z_]+:\s*/.test(line)) continue;
+    if (/^[A-Z0-9_]+:\s*/.test(line)) continue;
+    if (line === '{' || line === '}' || line === '[' || line === ']') continue;
+    return line;
+  }
+  return '';
+}
+
+function normalizeStringField(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function normalizeThreadStatus(thread) {
+  const rawStatus = thread?.status;
+  if (typeof rawStatus === 'string' && rawStatus.trim()) return rawStatus.trim();
+  if (rawStatus && typeof rawStatus === 'object') {
+    const candidate = rawStatus.label || rawStatus.name || rawStatus.state || rawStatus.status || rawStatus.text;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  const fallback = normalizeStringField(thread?.state);
+  return fallback || 'unknown';
+}
+
+function normalizeThreadSource(thread) {
+  const rawSource = thread?.source;
+  if (typeof rawSource === 'string' && rawSource.trim()) return rawSource.trim();
+  if (rawSource && typeof rawSource === 'object') {
+    const candidate = rawSource.label || rawSource.name || rawSource.kind || rawSource.source;
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return normalizeStringField(thread?.sourceKind) || normalizeStringField(thread?.source_kind) || '';
+}
+
+function normalizeAppServerThread(thread) {
+  const sessionId = String(thread?.sessionId || thread?.session_id || thread?.id || thread?.threadId || '').trim();
+  const startedAt = threadTimeValue(thread, ['startedAt', 'started_at', 'createdAt', 'created_at', 'createdTime', 'created_time']);
+  const updatedAt = threadTimeValue(thread, ['updatedAt', 'updated_at', 'modifiedAt', 'modified_at', 'lastActiveAt', 'last_active_at']) || startedAt;
+  const previewTitle = previewThreadTitle(thread?.preview);
+  const rawTitle = normalizeStringField(thread?.title) || normalizeStringField(thread?.name) || normalizeStringField(thread?.subject);
+  const title = rawTitle || previewTitle || '会话';
+  return {
+    id: String(thread?.id || sessionId || '').trim(),
+    title,
+    sessionId: sessionId || String(thread?.id || '').trim(),
+    status: normalizeThreadStatus(thread),
+    source: normalizeThreadSource(thread),
+    startedAt,
+    updatedAt,
+    boardManaged: hasAppServerThreadMarkers(thread)
+  };
+}
+
+function sortThreadListDesc(left, right) {
+  const leftMs = Date.parse(left.updatedAt || left.startedAt || '') || 0;
+  const rightMs = Date.parse(right.updatedAt || right.startedAt || '') || 0;
+  return rightMs - leftMs || String(right.sessionId || '').localeCompare(String(left.sessionId || ''));
+}
+
+function parsePsElapsedSeconds(value) {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  const dayParts = text.split('-');
+  const days = dayParts.length === 2 ? Number(dayParts[0]) || 0 : 0;
+  const timeText = dayParts.at(-1) || '';
+  const parts = timeText.split(':').map(part => Number(part) || 0);
+  if (parts.length === 3) return days * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2];
+  if (parts.length === 2) return days * 86400 + parts[0] * 60 + parts[1];
+  return days * 86400 + (parts[0] || 0);
+}
+
+function isCodexRelatedCommand(command) {
+  const text = String(command || '').toLowerCase();
+  if (!text.includes('codex')) return false;
+  return /(^|[\s/.-])codex([\s/.-]|$)/.test(text) || text.includes('@openai/codex') || text.includes('codex-cli') || text.includes('app-server');
+}
+
+async function listCodexProcesses() {
+  if (process.platform === 'win32') {
+    const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', `Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,WorkingSetSize,CreationDate | ConvertTo-Json -Compress`], { maxBuffer: 1024 * 1024 });
+    const parsed = stdout ? JSON.parse(stdout) : [];
+    const processes = (Array.isArray(parsed) ? parsed : [parsed])
+      .map(item => {
+        const command = String(item?.CommandLine || '').trim();
+        if (!isCodexRelatedCommand(command)) return null;
+        const sessionMatch = command.match(/\bcodex\s+resume\s+([A-Za-z0-9._:-]+)\b/i);
+        return {
+          pid: Number(item?.ProcessId) || 0,
+          ppid: Number(item?.ParentProcessId) || 0,
+          cpuPercent: 0,
+          memoryPercent: 0,
+          rssMb: Math.round(((Number(item?.WorkingSetSize) || 0) / 1024 / 1024) * 10) / 10,
+          elapsed: '',
+          elapsedSeconds: null,
+          command,
+          sessionId: sessionMatch?.[1] || '',
+          isSelf: Number(item?.ProcessId) === process.pid
+        };
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.rssMb - left.rssMb || left.pid - right.pid);
+    return processes;
+  }
+  const { stdout } = await execFileAsync('ps', ['-axo', 'pid=,ppid=,pcpu=,pmem=,rss=,etime=,command='], { maxBuffer: 1024 * 1024 });
+  const processes = stdout.split(/\r?\n/)
+    .map(line => {
+      const match = String(line || '').match(/^\s*(\d+)\s+(\d+)\s+([0-9.]+)\s+([0-9.]+)\s+(\d+)\s+(\S+)\s+(.+)$/);
+      if (!match) return null;
+      const [, pid, ppid, cpu, mem, rssKb, elapsed, command] = match;
+      const sessionMatch = command.match(/\bcodex\s+resume\s+([A-Za-z0-9._:-]+)\b/i);
+      return {
+        pid: Number(pid),
+        ppid: Number(ppid),
+        cpuPercent: Number(cpu) || 0,
+        memoryPercent: Number(mem) || 0,
+        rssMb: Math.round(((Number(rssKb) || 0) / 1024) * 10) / 10,
+        elapsed,
+        elapsedSeconds: parsePsElapsedSeconds(elapsed),
+        command: command.trim(),
+        sessionId: sessionMatch?.[1] || '',
+        isSelf: Number(pid) === process.pid
+      };
+    })
+    .filter(Boolean)
+    .filter(processInfo => isCodexRelatedCommand(processInfo.command))
+    .sort((left, right) => right.rssMb - left.rssMb || left.pid - right.pid);
+  return processes;
+}
+
 async function serveStatic(req, res, pathname) {
   let file = pathname === '/' ? path.join(PUBLIC_DIR, 'index.html') : path.join(PUBLIC_DIR, pathname.replace(/^\/+/, ''));
   file = path.resolve(file);
@@ -56,6 +203,16 @@ async function handleApi(req, res, url, appClient) {
     }
     if (req.method === 'GET' && url.pathname === '/api/codex') {
       return send(res, 200, { ok: true, codex: await cachedCodexInfo() });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/session-management') {
+      const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') || 100) || 100));
+      const response = await appClient.listThreads({ limit });
+      const threads = (response?.data || []).map(normalizeAppServerThread).filter(thread => thread.sessionId).sort(sortThreadListDesc);
+      return send(res, 200, { ok: true, threads, total: threads.length });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/session-management/processes') {
+      const processes = await listCodexProcesses();
+      return send(res, 200, { ok: true, processes, total: processes.length });
     }
     if (parts[1] === 'runs' && parts.length === 2) {
       if (req.method === 'GET') return send(res, 200, { runs: await listRuns({ includeArchived: url.searchParams.get('includeArchived') === '1', workspace: url.searchParams.get('workspace') || '' }) });

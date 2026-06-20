@@ -141,11 +141,47 @@
     .floating-copy-btn { position: absolute; top: 8px; left: 8px; z-index: 2; opacity: 0; pointer-events: none; transition: opacity .15s; padding: 5px 8px; background: rgba(71,85,105,.92); }
     .file-content-wrap:hover .floating-copy-btn:not(.hidden), .floating-copy-btn:focus { opacity: 1; pointer-events: auto; }
     .floating-copy-btn:not(.hidden) + pre { padding-top: 42px; }
-    .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(2,6,23,.72); }
+    .modal-backdrop { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-start; justify-content: center; padding: 12px 20px 20px; background: rgba(2,6,23,.72); overflow: auto; }
     .modal-backdrop.hidden { display: none; }
-    .modal-card { width: min(760px, 100%); border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 18px 60px rgba(0,0,0,.38); padding: 16px; }
+    .modal-card { width: min(960px, 100%); max-height: min(88vh, 860px); border: 1px solid var(--line); border-radius: 14px; background: var(--panel); box-shadow: 0 18px 60px rgba(0,0,0,.38); padding: 12px 16px 14px; overflow: hidden; display: flex; flex-direction: column; margin-top: 0; }
+    .modal-card.resizable { resize: vertical; }
     .modal-card textarea { min-height: 220px; }
+    .modal-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .modal-title-row h2 { margin: 0; }
+    .modal-title-actions { display: inline-flex; align-items: center; gap: 10px; }
+    .modal-title-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    .modal-close-btn { padding: 3px 9px; font-size: 18px; line-height: 1; opacity: .72; }
+    .modal-close-btn:hover { opacity: 1; }
     .page-footer { padding: 0 18px 18px; color: var(--muted); text-align: center; font-size: 12px; }
+    .session-management-trigger { margin-top: 8px; padding: 3px 8px; font-size: 12px; opacity: .72; }
+    .session-management-trigger:hover { opacity: 1; }
+    .session-management-tabs { display: flex; gap: 6px; margin: 8px 0 4px; flex-wrap: wrap; align-items: center; }
+    .session-management-tab { padding: 5px 9px; font-size: 12px; background: var(--gray); }
+    .session-management-tab.active { background: var(--blue); }
+    .session-management-load { margin-top: 10px; color: var(--muted); font-size: 12px; }
+    .session-management-body { display: flex; flex: 1; min-height: 0; flex-direction: column; margin-top: 2px; overflow: auto; }
+    .session-management-list { margin-top: 8px; display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+    .session-management-item { padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: #0b1324; }
+    .session-management-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: flex-start; }
+    .session-management-main { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+    .session-management-title { min-width: 0; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: min(640px, 66vw); }
+    .session-management-side { display: inline-flex; align-items: center; gap: 8px; min-width: 0; justify-self: end; }
+    .session-management-id { min-width: 0; font-variant-numeric: tabular-nums; word-break: break-all; color: var(--muted); }
+    .session-management-status { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+    .session-management-status .pill { padding: 2px 7px; font-size: 11px; }
+    .session-management-meta { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+    .session-management-empty { padding: 12px 0; color: var(--muted); }
+    .process-management { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
+    .process-management.hidden { display: none; }
+    .process-management-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+    .process-management-group { margin-top: 4px; }
+    .process-management-group-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin: 4px 0; }
+    .process-management-list { display: flex; flex-direction: column; gap: 8px; }
+    .process-management-item { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; background: #081120; }
+    .process-management-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .process-management-resume { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+    .process-management-resume .pill { padding: 2px 7px; font-size: 11px; }
+    .modal-card h2:first-child { margin-top: 0; }
   </style>
 </head>
 <body>
@@ -159,7 +195,7 @@
       </div>
       <div class="workspace-filter-panel">
         <select id="workspaceFilterSelect" class="workspace-filter-select" onchange="setWorkspaceFilter(this.value)" title="未筛选工作区"></select>
-        <span id="runsLoadHint" class="runs-load-icon" title="批次列表尚未加载" aria-label="批次列表尚未加载">ⓘ</span>
+        <span id="runsLoadHint" class="runs-load-icon" title="批次列表尚未加载" aria-label="批次列表尚未加载">i</span>
       </div>
       <div id="runs" class="run-list"><div class="empty">批次列表加载中...</div></div>
     </section>
@@ -190,7 +226,7 @@
       <h2>批次详情</h2>
       <div class="build-header">
         <div id="selected" class="muted">未选择任务批次</div>
-        <div id="autoRefreshHint" class="muted hidden">自动刷新：未启动</div>
+        <div id="autoRefreshHint" class="muted hidden">自动刷新:未启动</div>
         <div id="runNotice" class="notice warning hidden"></div>
         <div id="actionToolbar" class="toolbar"></div>
       </div>
@@ -202,7 +238,7 @@
     <section id="filePanel" class="log-panel">
       <div class="section-header">
         <h2>任务详情</h2>
-        <span class="info-icon" title="若执行过程提示 Permission denied / sandbox denied，这通常不是任务本身失败，而是当前 worker 沙箱能力不足；在可信工作区可改用 danger-full-access。DNS / 网络失败则通常需要检查代理、VPN 或本地 evidence。" aria-label="任务详情权限与网络提示">ⓘ</span>
+        <span class="info-icon" title="若执行过程提示 Permission denied / sandbox denied,这通常不是任务本身失败,而是当前 worker 沙箱能力不足;在可信工作区可改用 danger-full-access。DNS / 网络失败则通常需要检查代理、VPN 或本地 evidence。" aria-label="任务详情权限与网络提示">i</span>
       </div>
       <div id="fileTitle" class="muted">点击任务后查看详情</div>
       <div id="fileTabs" class="toolbar file-tabs"></div>
@@ -214,14 +250,34 @@
     </section>
   </div>
 </main>
-<footer class="page-footer"><div id="pageFooter">版本：-</div><div id="codexStatus" class="codex-status hidden"></div></footer>
+<footer class="page-footer"><div id="pageFooter">版本：-</div><div id="codexStatus" class="codex-status hidden"></div><button id="sessionManagementTrigger" class="secondary session-management-trigger" onclick="openSessionManagement()">会话管理</button></footer>
+<div id="sessionManagementModal" class="modal-backdrop hidden" onclick="closeSessionManagement(event)">
+  <div id="sessionManagementModalCard" class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-title-row">
+      <h2>会话管理</h2>
+      <div class="modal-title-actions"><span id="sessionManagementTotalMemory" class="modal-title-meta"></span><button class="secondary modal-close-btn" title="关闭" aria-label="关闭" onclick="closeSessionManagement()">×</button></div>
+    </div>
+    <div class="session-management-tabs">
+      <button id="sessionManagementTabBoard" class="secondary session-management-tab active" onclick="setSessionManagementTab('board')">看板</button>
+      <button id="sessionManagementTabLocal" class="secondary session-management-tab" onclick="setSessionManagementTab('local')">本机</button>
+    </div>
+    <div class="session-management-body">
+      <div id="sessionManagementLoad" class="session-management-load">尚未加载</div>
+      <div id="sessionManagementList" class="session-management-list"></div>
+      <div id="processManagementPanel" class="process-management hidden">
+        <div class="process-management-title"><span>本机 Codex 进程</span><span id="processManagementLoad">尚未加载</span></div>
+        <div id="processManagementList" class="process-management-list"></div>
+      </div>
+    </div>
+  </div>
+</div>
 <div id="manualCompleteModal" class="modal-backdrop hidden">
   <div class="modal-card">
     <h2>手动标记成功</h2>
     <div id="manualCompleteTitle" class="muted"></div>
     <label>人工成功执行结果</label>
     <textarea id="manualCompleteResult" placeholder="粘贴 codex resume 后的最终回复、验证结果、关键证据或 artifact 路径"></textarea>
-    <div class="muted">该内容会保存为 manual_result.md，显示在“结果”中，并作为 final judge 的人工成功证据。</div>
+    <div class="muted">该内容会保存为 manual_result.md,显示在"结果"中,并作为 final judge 的人工成功证据。</div>
     <div class="toolbar">
       <button onclick="submitManualComplete()">确认标记成功</button>
       <button class="secondary" onclick="closeManualCompleteModal()">取消</button>
@@ -237,6 +293,11 @@ let pendingArchiveRunId = null;
 let pendingAction = null;
 let currentState = null;
 let lastAutoRefreshAt = null;
+let sessionManagementOpen = false;
+let sessionManagementTab = 'board';
+const SESSION_MODAL_HEIGHT_STORAGE_KEY = 'input-kanban.sessionManagementHeight';
+let sessionManagementState = { loading: false, threads: [], total: 0, error: '' };
+let processManagementState = { loading: false, processes: [], total: 0, error: '' };
 let runListVisibleCount = 10;
 let latestRuns = [];
 let workspaceCatalogRuns = [];
@@ -314,7 +375,7 @@ function runDurationEnd(s) {
     ...(s.tasks || []).flatMap(task => [task.endedAt, task.completedAt, task.stoppedAt])
   ]) || s.updatedAt;
 }
-function runTimingText(s) { return `开始时刻 ${formatDateTime(s.createdAt)}｜用时 ${formatDurationMs(durationSeconds(s.createdAt, runDurationEnd(s)) * 1000)}`; }
+function runTimingText(s) { return `开始时刻 ${formatDateTime(s.createdAt)}|用时 ${formatDurationMs(durationSeconds(s.createdAt, runDurationEnd(s)) * 1000)}`; }
 function basenamePath(value) {
   const parts = String(value || '').split(/[\\/]/).filter(Boolean);
   return parts.at(-1) || value || '-';
@@ -389,14 +450,14 @@ async function loadCodexStatus() {
     el.classList.remove('hidden', 'warning');
     if (!codex.installed) {
       el.classList.add('warning');
-      el.innerHTML = `Codex 未安装｜<code>${esc(codex.installCommand || 'npm install -g @openai/codex')}</code>`;
+      el.innerHTML = `Codex 未安装|<code>${esc(codex.installCommand || 'npm install -g @openai/codex')}</code>`;
     } else {
       el.innerHTML = `<code>${esc(codex.versionText || codex.installedVersion || 'codex')}</code>`;
     }
   } catch (error) {
     el.classList.remove('hidden');
     el.classList.add('warning');
-    el.innerHTML = `Codex：检测失败｜${esc(errorDetail(error))}`;
+    el.innerHTML = `Codex:检测失败|${esc(errorDetail(error))}`;
   }
 }
 function showCreateForm() {
@@ -474,7 +535,7 @@ function renderRunList() {
       </div>
     </div>`);
   if (latestRuns.length > runListVisibleCount) {
-    cards.push(`<button class="secondary run-list-more" onclick="showMoreRuns()">查看更多（${runListVisibleCount}/${latestRuns.length}）</button>`);
+    cards.push(`<button class="secondary run-list-more" onclick="showMoreRuns()">查看更多(${runListVisibleCount}/${latestRuns.length})</button>`);
   }
   document.getElementById('runs').innerHTML = latestRuns.length ? cards.join('') : '<div class="empty">暂无任务批次</div>';
 }
@@ -513,7 +574,7 @@ function updateWorkspaceFilterTitle() {
   if (selectedWorkspaceFilter === WORKSPACE_FILTER_ALL) {
     select.title = currentWorkspacePath ? `未筛选工作区｜默认工作区：${currentWorkspacePath}` : '未筛选工作区';
   } else {
-    select.title = `当前筛选：${selectedWorkspaceFilter}`;
+    select.title = `当前筛选:${selectedWorkspaceFilter}`;
   }
 }
 function setWorkspaceFilter(value) {
@@ -536,11 +597,12 @@ async function refreshSelected({auto=false} = {}) {
   await loadTaskDescription();
   renderTasks(); await refreshRuns();
   if (selectedTask && selectedFileName) await loadFile(selectedFileName, { preserveScroll: true });
+  if (sessionManagementOpen) await refreshSessionManagement();
 }
 function renderSelectedHeader() {
   if (!currentState) return '<div class="muted">未选择任务批次</div>';
   const sandbox = currentState.workerSandbox || 'workspace-write';
-  const titleActions = [`<button class="secondary copy-btn title-copy-btn" title="复制 Run ID：${esc(currentState.runId)}" data-copy-kind="run-id" onclick="copyRunId(event)">${titleCopyLabel('run-id')}</button>`];
+  const titleActions = [`<button class="secondary copy-btn title-copy-btn" title="复制 Run ID:${esc(currentState.runId)}" data-copy-kind="run-id" onclick="copyRunId(event)">${titleCopyLabel('run-id')}</button>`];
   if (currentState.runner === 'tmux' && hasRunTmuxMetadata(currentState)) {
     titleActions.push(`<button class="secondary copy-btn title-copy-btn" title="复制 tmux attach 指令" data-copy-kind="tmux" onclick="copyTmuxRunCommand(event)">${titleCopyLabel('tmux')}</button>`);
   }
@@ -566,7 +628,7 @@ async function loadTaskDescription() {
 }
 function refreshPulseChip() {
   const last = lastAutoRefreshAt ? lastAutoRefreshAt.toLocaleTimeString() : '尚未触发';
-  return `<span id="refreshPulse" class="refresh-pulse-chip" title="自动刷新：每 ${AUTO_REFRESH_MS / 1000} 秒；上次 ${esc(last)}"><span class="refresh-pulse-dot"></span></span>`;
+  return `<span id="refreshPulse" class="refresh-pulse-chip" title="自动刷新:每 ${AUTO_REFRESH_MS / 1000} 秒;上次 ${esc(last)}"><span class="refresh-pulse-dot"></span></span>`;
 }
 function actionButton({ key, label, onclick, variant = '', state = '', disabled = false, title = '' }) {
   const classes = [variant, state ? `state-${state}` : ''].filter(Boolean).join(' ');
@@ -576,11 +638,11 @@ function runActionState(key) {
   if (!selectedRun || !currentState) return { label: '-', disabled: true, state: '' };
   if (pendingAction === key) {
     return {
-      plan: { label: '拆分中…', disabled: true, state: 'pending' },
-      dispatch: { label: '启动中…', disabled: true, state: 'pending' },
-      judge: { label: '验收中…', disabled: true, state: 'pending' },
-      stop: { label: '停止中…', disabled: true, state: 'pending' },
-      archive: { label: '归档中…', disabled: true, state: 'pending' }
+      plan: { label: '拆分中...', disabled: true, state: 'pending' },
+      dispatch: { label: '启动中...', disabled: true, state: 'pending' },
+      judge: { label: '验收中...', disabled: true, state: 'pending' },
+      stop: { label: '停止中...', disabled: true, state: 'pending' },
+      archive: { label: '归档中...', disabled: true, state: 'pending' }
     }[key];
   }
   const status = currentState.status;
@@ -666,6 +728,204 @@ function triggerRefreshPulse() {
   void el.offsetWidth;
   el.classList.add('pulse');
 }
+function sessionManagementStateLabel(thread) {
+  const started = formatDateTime(thread?.startedAt);
+  const updated = formatDateTime(thread?.updatedAt);
+  return `创建 ${started}｜最后更新 ${updated}`;
+}
+function sessionManagementShortId(sessionId) {
+  const text = String(sessionId || '');
+  return text.length > 10 ? `…${text.slice(-10)}` : text || '-';
+}
+function sessionManagementThreadTitle(thread) {
+  const title = typeof thread?.title === 'string' ? thread.title.trim() : '';
+  const previewLine = String(thread?.preview || '').split(/\r?\n/).map(line => line.trim()).find(line => line && !/^ORCHESTRATOR_[A-Z_]+:\s*/.test(line)) || '';
+  return title || previewLine || String(thread?.sessionId || '').trim() || '-';
+}
+function sessionManagementTabLabel(tab) {
+  return tab === 'board' ? '看板' : '本机';
+}
+function formatProcessMemory(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(number >= 10 ? 0 : 1)} MB` : '-';
+}
+function formatProcessElapsed(processInfo) {
+  return processInfo?.elapsed || '-';
+}
+function setSessionManagementTab(tab) {
+  sessionManagementTab = tab === 'local' ? 'local' : 'board';
+  renderSessionManagementList();
+  renderProcessManagementList();
+}
+function restoreSessionManagementHeight() {
+  const modalCard = document.getElementById('sessionManagementModalCard');
+  const saved = localStorage.getItem(SESSION_MODAL_HEIGHT_STORAGE_KEY);
+  if (!modalCard?.style) return;
+  modalCard.style.height = saved || '78vh';
+}
+function saveSessionManagementHeight() {
+  const modalCard = document.getElementById('sessionManagementModalCard');
+  if (!modalCard?.style || typeof getComputedStyle !== 'function') return;
+  const height = getComputedStyle(modalCard).height;
+  if (height) localStorage.setItem(SESSION_MODAL_HEIGHT_STORAGE_KEY, height);
+}
+function renderSessionManagementList() {
+  const list = document.getElementById('sessionManagementList');
+  const hint = document.getElementById('sessionManagementLoad');
+  const boardTab = document.getElementById('sessionManagementTabBoard');
+  const localTab = document.getElementById('sessionManagementTabLocal');
+  if (!list || !hint || !boardTab || !localTab) return;
+  boardTab.classList.toggle('active', sessionManagementTab === 'board');
+  localTab.classList.toggle('active', sessionManagementTab === 'local');
+  if (!sessionManagementOpen) return;
+  if (sessionManagementState.loading) {
+    hint.textContent = '正在加载…';
+    list.innerHTML = '<div class="session-management-empty">正在加载会话列表…</div>';
+    return;
+  }
+  if (sessionManagementState.error) {
+    hint.textContent = `加载失败：${sessionManagementState.error}`;
+    list.innerHTML = '<div class="session-management-empty">会话列表加载失败</div>';
+    return;
+  }
+  hint.textContent = '';
+  const threads = (sessionManagementState.threads || []).filter(thread => sessionManagementTab === 'board' ? !!thread.boardManaged : !thread.boardManaged);
+  if (!threads.length) {
+    list.innerHTML = '';
+    return;
+  }
+  list.innerHTML = threads.map(thread => `
+    <div class="session-management-item">
+      <div class="session-management-row">
+        <div class="session-management-main">
+          <span class="session-management-title" title="${esc(sessionManagementThreadTitle(thread))}">${esc(sessionManagementThreadTitle(thread))}</span>
+        </div>
+        <div class="session-management-side">
+          <span class="session-management-id" title="${esc(thread.sessionId)}">${esc(sessionManagementShortId(thread.sessionId))}</span>
+          <button class="copy-btn" title="复制完整会话ID" onclick='copySessionManagementId(event, ${JSON.stringify(thread.sessionId)})'>⧉</button>
+          ${thread.status && thread.status !== 'unknown' ? `<span class="session-management-status"><span class="pill ${esc(thread.status || '')}">${esc(thread.status || '-')}</span></span>` : ''}
+        </div>
+      </div>
+      <div class="session-management-meta">
+        ${metaChip('创建', formatDateTime(thread.startedAt))}
+        ${metaChip('最后更新', formatDateTime(thread.updatedAt))}
+        ${metaChip('来源', thread.source || '-')}
+      </div>
+    </div>
+  `).join('');
+}
+function renderProcessManagementList() {
+  const panel = document.getElementById('processManagementPanel');
+  const list = document.getElementById('processManagementList');
+  const load = document.getElementById('processManagementLoad');
+  if (!panel || !list || !load) return;
+  panel.classList.toggle('hidden', sessionManagementTab !== 'local');
+  if (sessionManagementTab !== 'local') return;
+  if (processManagementState.loading) {
+    load.textContent = '正在加载…';
+    list.innerHTML = '<div class="session-management-empty">正在扫描本机 Codex 进程…</div>';
+    return;
+  }
+  if (processManagementState.error) {
+    load.textContent = `加载失败：${processManagementState.error}`;
+    list.innerHTML = '<div class="session-management-empty">进程列表加载失败</div>';
+    return;
+  }
+  const processes = processManagementState.processes || [];
+  const resumableProcesses = processes.filter(processInfo => processInfo.sessionId);
+  const otherProcesses = processes.filter(processInfo => !processInfo.sessionId);
+  const totalMemoryMb = processes.reduce((sum, processInfo) => sum + (Number(processInfo.rssMb) || 0), 0);
+  const totalMemory = document.getElementById('sessionManagementTotalMemory');
+  if (totalMemory) totalMemory.textContent = `总占用内存 ${formatProcessMemory(totalMemoryMb)}`;
+  load.textContent = `${resumableProcesses.length || 0} 个可 resume 进程｜${otherProcesses.length || 0} 个其他进程`;
+  if (!processes.length) {
+    list.innerHTML = '';
+    return;
+  }
+  const renderProcessCard = processInfo => `
+    <div class="process-management-item">
+      <div class="process-management-row">
+        <div class="session-management-main">
+          ${metaChip('PID', processInfo.pid, { title: processInfo.command || '' })}
+          ${metaChip('父进程', processInfo.ppid)}
+          ${metaChip('内存', formatProcessMemory(processInfo.rssMb))}
+          ${metaChip('CPU', `${processInfo.cpuPercent || 0}%`)}
+          ${metaChip('运行', formatProcessElapsed(processInfo))}
+        </div>
+        ${processInfo.sessionId ? `<span class="process-management-resume"><span class="pill">resume</span><button class="secondary copy-btn" title="复制会话ID" onclick='copySessionId(event, ${JSON.stringify(processInfo.sessionId)})'>⧉</button></span>` : ''}
+      </div>
+    </div>
+  `;
+  list.innerHTML = `
+    ${resumableProcesses.length ? `<div class="process-management-group"><div class="process-management-group-title"><span>可 resume</span><span>${resumableProcesses.length}</span></div><div class="process-management-list">${resumableProcesses.map(renderProcessCard).join('')}</div></div>` : ''}
+    ${otherProcesses.length ? `<div class="process-management-group"><div class="process-management-group-title"><span>其他 Codex 进程</span><span>${otherProcesses.length}</span></div><div class="process-management-list">${otherProcesses.map(renderProcessCard).join('')}</div></div>` : ''}
+  `;
+}
+async function loadProcessManagement() {
+  processManagementState.loading = true;
+  processManagementState.error = '';
+  renderProcessManagementList();
+  try {
+    const data = await api('/api/session-management/processes');
+    processManagementState = { loading: false, processes: data.processes || [], total: data.total || 0, error: '' };
+  } catch (error) {
+    processManagementState = { loading: false, processes: [], total: 0, error: errorDetail(error) };
+  }
+  renderProcessManagementList();
+}
+async function loadSessionManagement() {
+  const load = document.getElementById('sessionManagementLoad');
+  if (!load) return;
+  sessionManagementState.loading = true;
+  sessionManagementState.error = '';
+  renderSessionManagementList();
+  try {
+    const data = await api('/api/session-management?limit=100');
+    sessionManagementState = { loading: false, threads: data.threads || [], total: data.total || 0, error: '' };
+  } catch (error) {
+    sessionManagementState = { loading: false, threads: [], total: 0, error: errorDetail(error) };
+  }
+  renderSessionManagementList();
+}
+async function openSessionManagement() {
+  sessionManagementOpen = true;
+  const modal = document.getElementById('sessionManagementModal');
+  modal.classList.remove('hidden');
+  restoreSessionManagementHeight();
+  await Promise.all([loadSessionManagement(), loadProcessManagement()]);
+}
+function closeSessionManagement(event) {
+  if (event?.target && event.target !== event.currentTarget) return;
+  sessionManagementOpen = false;
+  saveSessionManagementHeight();
+  document.getElementById('sessionManagementModal').classList.add('hidden');
+}
+async function refreshSessionManagement() {
+  if (!sessionManagementOpen) return;
+  await Promise.all([loadSessionManagement(), loadProcessManagement()]);
+}
+async function copySessionId(event, sessionId) {
+  event.stopPropagation();
+  try {
+    await navigator.clipboard.writeText(sessionId);
+    event.currentTarget.textContent = '✓';
+    setTimeout(() => { event.currentTarget.textContent = '⧉'; }, 900);
+  } catch {
+    prompt('复制 Codex 会话ID', sessionId);
+  }
+}
+function initSessionManagementResize() {
+  const card = document.getElementById('sessionManagementModalCard');
+  if (!card) return;
+  card.classList.add('resizable');
+  if (card.style) {
+    card.style.height = localStorage.getItem(SESSION_MODAL_HEIGHT_STORAGE_KEY) || '78vh';
+    card.style.minHeight = '380px';
+  }
+  if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('mouseup', saveSessionManagementHeight);
+  }
+}
 function updateRunNotice() {
   const el = document.getElementById('runNotice');
   if (!el) return;
@@ -677,12 +937,12 @@ function updateRunNotice() {
   const error = currentState.planner?.planParseError;
   if (currentState.status === 'plan_empty') {
     el.classList.remove('hidden');
-    el.textContent = `Planner 已完成，但没有拆出任何任务。可以调整任务说明或直接再次点击“拆分任务”重试。${error ? `原因：${error}` : ''}`;
+    el.textContent = `Planner 已完成,但没有拆出任何任务。可以调整任务说明或直接再次点击"拆分任务"重试。${error ? `原因:${error}` : ''}`;
     return;
   }
   if (currentState.status === 'plan_failed' && error) {
     el.classList.remove('hidden');
-    el.textContent = `Planner 拆分失败。可以再次点击“拆分任务”重试。原因：${error}`;
+    el.textContent = `Planner 拆分失败。可以再次点击"拆分任务"重试。原因:${error}`;
     return;
   }
   el.classList.add('hidden');
@@ -691,10 +951,10 @@ function updateRunNotice() {
 function updateAutoRefreshHint() {
   const el = document.getElementById('autoRefreshHint');
   if (!el) return;
-  if (!selectedRun || !currentState) { el.textContent = '自动刷新：未启动'; return; }
+  if (!selectedRun || !currentState) { el.textContent = '自动刷新:未启动'; return; }
   const active = ['planning','running','judging','planned','batches_completed','batch_blocked'].includes(currentState.status) || (currentState.tasks || []).some(t => t.status === 'running') || currentState.planner?.status === 'running' || currentState.judge?.status === 'running';
   const last = lastAutoRefreshAt ? lastAutoRefreshAt.toLocaleTimeString() : '尚未触发';
-  el.textContent = active ? `自动模式中：每 ${AUTO_REFRESH_MS / 1000} 秒刷新并推进一次｜上次刷新 ${last}` : `自动模式待命：每 ${AUTO_REFRESH_MS / 1000} 秒检查一次｜上次刷新 ${last}`;
+  el.textContent = active ? `自动模式中:每 ${AUTO_REFRESH_MS / 1000} 秒刷新并推进一次|上次刷新 ${last}` : `自动模式待命:每 ${AUTO_REFRESH_MS / 1000} 秒检查一次|上次刷新 ${last}`;
 }
 function taskStatusCell(t) {
   if (t?.manualCompletion) {
@@ -708,7 +968,7 @@ function taskActionCell(id, t) {
   if (t.manualCompletion) return '<span class="muted">已人工确认</span>';
   if (!['unknown', 'failed'].includes(t.status)) return '-';
   const pending = pendingAction === `manual:${id}`;
-  return `<button class="danger ${pending ? 'state-pending' : ''}"${pending ? ' disabled' : ''} onclick="markTaskCompleted(event, '${id}')">${pending ? '标记中…' : '手动标记成功'}</button>`;
+  return `<button class="danger ${pending ? 'state-pending' : ''}"${pending ? ' disabled' : ''} onclick="markTaskCompleted(event, '${id}')">${pending ? '标记中...' : '手动标记成功'}</button>`;
 }
 function shortSessionId(thread) {
   const text = String(thread || '');
@@ -716,7 +976,7 @@ function shortSessionId(thread) {
 }
 function sessionCell(thread) {
   if (!thread) return '-';
-  return `<span class="session-cell-wrap"><span class="session-cell" title="${esc(thread)}">…${esc(shortSessionId(thread))}</span><button class="copy-btn" title="复制完整 Codex 会话ID" onclick="copySessionId(event, '${esc(thread)}')">⧉</button></span>`;
+  return `<span class="session-cell-wrap"><span class="session-cell" title="${esc(thread)}">...${esc(shortSessionId(thread))}</span><button class="copy-btn" title="复制完整 Codex 会话ID" onclick="copySessionId(event, '${esc(thread)}')">⧉</button></span>`;
 }
 function taskStartedCell(t) {
   return t?.startedAt ? formatDateTime(t.startedAt) : '-';
@@ -1057,7 +1317,7 @@ async function dispatchRun() {
 async function judgeRun() { if (selectedRun) await runActionWithPending('judge', async () => { await api(`/api/runs/${selectedRun}/judge`, {method:'POST'}); await refreshSelected(); }); }
 async function stopSelectedRun() {
   if (!selectedRun) return;
-  const ok = confirm('确认停止当前任务批次？\n\n停止会终止仍在运行的 codex exec 子进程，并冻结后续调度。');
+  const ok = confirm('确认停止当前任务批次?\n\n停止会终止仍在运行的 codex exec 子进程,并冻结后续调度。');
   if (!ok) return;
   await runActionWithPending('stop', async () => {
     await api(`/api/runs/${selectedRun}/stop`, {
@@ -1085,7 +1345,7 @@ async function archiveRunFromCard(event, runId) {
 async function archiveRunById(runId, { confirmFirst = true } = {}) {
   if (!runId) return;
   if (confirmFirst) {
-    const ok = confirm('确认归档当前任务批次？\n\n归档后会从默认任务批次列表隐藏。若仍有任务运行，请先停止。');
+    const ok = confirm('确认归档当前任务批次?\n\n归档后会从默认任务批次列表隐藏。若仍有任务运行,请先停止。');
     if (!ok) return;
   }
   await runActionWithPending('archive', async () => {
@@ -1112,7 +1372,7 @@ async function markTaskCompleted(event, taskId) {
   event.stopPropagation();
   if (!selectedRun || taskId === 'planner' || taskId === 'judge') return;
   const task = (currentState?.tasks || []).find(t => t.id === taskId);
-  if (task?.status === 'running') { alert('任务仍在执行中，不能手动标记成功。'); return; }
+  if (task?.status === 'running') { alert('任务仍在执行中,不能手动标记成功。'); return; }
   manualCompleteTaskId = taskId;
   document.getElementById('manualCompleteTitle').textContent = `${selectedRun} / ${taskId}`;
   document.getElementById('manualCompleteResult').value = '';
@@ -1141,6 +1401,7 @@ async function submitManualComplete() {
 }
 
 initializeWorkerSandboxPreference();
+initSessionManagementResize();
 renderActionToolbar();
 loadCodexStatus().catch(console.error);
 loadHealth().then(refreshRuns);

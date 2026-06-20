@@ -1,5 +1,21 @@
 # Release Notes
 
+## v0.0.16
+
+### Highlights
+
+- Add a low-profile footer entry for session management, covering both board-managed and local Codex sessions.
+- Show board/local tabs in the session modal and classify sessions with lightweight board-managed metadata.
+- Add local Codex process visibility in the session modal, including resumable sessions, other Codex-related processes, and total memory usage in the modal header.
+- Simplify the session modal layout with a compact close control, adjustable height, wider default width, and reduced empty spacing.
+- Keep only meaningful session status badges, hide `unknown` in session cards, and move session IDs/copy actions to the right side.
+
+### Verification
+
+- `node --test test/server-static.test.js` passed locally.
+- `node --test test/frontend-tmux-ui.test.js` passed locally.
+- Windows-native validation passed on `zhangxing_win` with `npm run check` in the Windows release-candidate working tree.
+
 ## v0.0.15
 
 ### Highlights
