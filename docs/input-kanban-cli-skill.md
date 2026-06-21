@@ -12,6 +12,18 @@ Use the `input-kanban` CLI as the execution tool for tasks that have already bee
 - Use `status`, `result`, and `stop` for observation and control.
 - Do not rely on the model alone to declare completion.
 
+## Before `submit`: Prepare the Handoff
+
+If the task came from an external Agent conversation, prepare a structured `task.md` first. Prefer these sections:
+
+- `Goal`
+- `Acceptance Criteria`
+- `Expected Artifacts`
+- `Context References`
+- `Risks`
+
+Use `skills/input-kanban-prepare/SKILL.md` when an Agent needs a stricter preparation workflow.
+
 ## When to Use `submit`
 
 Use `submit` only when a new task identity is needed.

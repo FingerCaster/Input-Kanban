@@ -381,6 +381,10 @@ Rules:
 - Include exact output/artifact expectations in each worker prompt.
 - Default worker sandbox for this run is ${state.workerSandbox || 'workspace-write'}; use that sandbox unless a task has a specific safety reason to be stricter.
 - If the input already contains task sections, preserve their ids when practical.
+- If the input contains structured handoff sections such as Goal, Acceptance Criteria, Expected Artifacts, Context References, Execution Hints, Risks, or Suggested Batches, treat them as the execution contract.
+- Do not change the user's goal or acceptance criteria. Convert the contract into safe batches, concrete worker prompts, and expectedArtifacts.
+- Use provided expected artifacts and verification notes to make each worker task and the final judge easier to verify.
+- If a handoff is incomplete, make conservative assumptions explicit inside worker prompts instead of silently inventing scope.
 
 User task:
 ${taskText}

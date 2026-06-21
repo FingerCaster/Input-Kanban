@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const cli = await fsp.readFile(new URL('../bin/input-kanban.js', import.meta.url), 'utf8');
+const orchestrator = await fsp.readFile(new URL('../src/orchestrator.js', import.meta.url), 'utf8');
 const readme = await fsp.readFile(new URL('../README.md', import.meta.url), 'utf8');
 const packageJson = JSON.parse(await fsp.readFile(new URL('../package.json', import.meta.url), 'utf8'));
 const cliPath = fileURLToPath(new URL('../bin/input-kanban.js', import.meta.url));
@@ -37,6 +38,7 @@ test('CLI exposes version output', () => {
 test('CLI help exposes the agent guide entry point', () => {
   const helpOutput = runCli(['--help']);
   assert.match(helpOutput, /input-kanban guide \[options\]/);
+  assert.match(helpOutput, /input-kanban install-skill codex \[options\]/);
   assert.match(helpOutput, /Agent guide:/);
 });
 
@@ -44,6 +46,7 @@ test('CLI guide prints the agent quick start and JSON form', () => {
   const guideOutput = runCli(['guide']);
   assert.match(guideOutput, /Input Kanban Agent Guide/);
   assert.match(guideOutput, /Quick start:/);
+  assert.match(guideOutput, /Expected Artifacts/);
   assert.match(guideOutput, /input-kanban retry run_1234567890/);
 
   const jsonOutput = runCli(['--json', 'guide']);
@@ -51,7 +54,32 @@ test('CLI guide prints the agent quick start and JSON form', () => {
   assert.equal(parsed.ok, true);
   assert.equal(parsed.command, 'guide');
   assert.equal(parsed.templates.length, 10);
+  assert.deepEqual(parsed.handoffSections, ['Goal', 'Acceptance Criteria', 'Expected Artifacts', 'Context References', 'Risks']);
+  assert.equal(parsed.skillInstall, 'input-kanban install-skill codex');
   assert.match(parsed.templates[0], /input-kanban submit --task/);
+});
+
+test('CLI installs bundled prepare skill for Codex', async () => {
+  const targetRoot = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-codex-skills-'));
+  const dryRunOutput = runCli(['--json', 'install-skill', 'codex', '--target-dir', targetRoot, '--dry-run']);
+  const dryRun = JSON.parse(dryRunOutput);
+  assert.equal(dryRun.ok, true);
+  assert.equal(dryRun.provider, 'codex');
+  assert.equal(dryRun.installed, false);
+  assert.equal(dryRun.targetDir, path.join(targetRoot, 'input-kanban-prepare'));
+
+  const installOutput = runCli(['--json', 'install-skill', 'codex', '--target-dir', targetRoot]);
+  const installed = JSON.parse(installOutput);
+  assert.equal(installed.installed, true);
+  assert.equal(installed.replaced, false);
+  const skillText = await fsp.readFile(path.join(targetRoot, 'input-kanban-prepare', 'SKILL.md'), 'utf8');
+  assert.match(skillText, /# input-kanban-prepare/);
+});
+
+test('planner prompt consumes structured handoff sections as execution contract', () => {
+  assert.match(orchestrator, /structured handoff sections such as Goal, Acceptance Criteria, Expected Artifacts/);
+  assert.match(orchestrator, /treat them as the execution contract/);
+  assert.match(orchestrator, /Do not change the user's goal or acceptance criteria/);
 });
 
 test('CLI emits JSON runs output for active discovery', async () => {
@@ -281,7 +309,7 @@ test('CLI emits JSON stop output', async () => {
 });
 
 test('CLI exposes submit auto loop without replacing serve mode', () => {
-  assert.match(cli, /COMMANDS = new Set\(\['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide'\]\)/);
+  assert.match(cli, /COMMANDS = new Set\(\['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide', 'install-skill'\]\)/);
   assert.match(cli, /input-kanban v\$\{PACKAGE_VERSION\}/);
   assert.match(cli, /input-kanban --version/);
   assert.match(cli, /input-kanban runs \[options\]/);
@@ -323,18 +351,15 @@ test('CLI exposes submit auto loop without replacing serve mode', () => {
   assert.match(cli, /input-kanban status <runId> --watch/);
 });
 
-test('README documents CLI runs are visible in the Web dashboard', () => {
-  assert.match(readme, /input-kanban submit --task-file task\.md --label "修复登录问题"/);
+test('README focuses on friendly usage and structured handoff', () => {
+  assert.match(readme, /## 最快开始/);
+  assert.match(readme, /## 最常见的 6 个用法/);
   assert.match(readme, /input-kanban submit --task "修复登录问题，并补充回归测试" --label "修复登录问题"/);
-  assert.match(readme, /input-kanban submit --task-file task\.md -d/);
-  assert.match(readme, /默认 workspace 是当前目录/);
-  assert.match(readme, /如果不传 `--label`，任务批次名称会从任务内容自动生成/);
-  assert.match(readme, /CLI 创建的任务会在 Web 界面里可见/);
-  assert.match(readme, /input-kanban runs/);
-  assert.match(readme, /input-kanban --json runs --active/);
-  assert.match(readme, /input-kanban status --watch/);
-  assert.match(readme, /input-kanban --json status <runId>/);
-  assert.match(readme, /input-kanban result <runId> --copy/);
-  assert.match(readme, /input-kanban --json result <runId>/);
-  assert.match(readme, /不传 `runId` 时，`status` 和 `result` 默认查看最近一次任务批次/);
+  assert.match(readme, /input-kanban submit --task-file task\.md --plan-approval/);
+  assert.match(readme, /input-kanban guide/);
+  assert.match(readme, /## 从外部 Agent 对话交给看板执行/);
+  assert.match(readme, /Acceptance Criteria/);
+  assert.match(readme, /Expected Artifacts/);
+  assert.match(readme, /skills\/input-kanban-prepare\/SKILL\.md/);
+  assert.match(readme, /docs\/input-kanban-prepare\.md/);
 });

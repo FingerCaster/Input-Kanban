@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const PACKAGE_VERSION = JSON.parse(await fsp.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VALID_RUNNERS = ['headless', 'tmux'];
 const VALID_SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'];
-const COMMANDS = new Set(['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide']);
+const COMMANDS = new Set(['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide', 'install-skill']);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const STATUS_TEXT = {
   created: '已创建', planning: '拆分中', plan_failed: '拆分失败', plan_empty: '拆分为空', planned: '已拆分',
@@ -178,6 +178,22 @@ function parseGuideArgs(argv) {
   return args;
 }
 
+function parseInstallSkillArgs(argv) {
+  const args = { provider: undefined, targetDir: undefined, force: false, dryRun: false, json: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    const next = () => argv[++i];
+    if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
+    else if (arg === '--target-dir') args.targetDir = next();
+    else if (arg === '--force') args.force = true;
+    else if (arg === '--dry-run') args.dryRun = true;
+    else if (!arg.startsWith('-') && !args.provider) args.provider = arg;
+    else throw new Error(`unknown install-skill argument: ${arg}`);
+  }
+  return args;
+}
+
 function parseSubmitArgs(argv) {
   const args = {
     host: '127.0.0.1', port: 8787, workspace: undefined, repo: undefined, runsDir: undefined, codexBin: undefined,
@@ -246,6 +262,7 @@ Usage:
   input-kanban serve [options]
   input-kanban submit [options]
   input-kanban guide [options]
+  input-kanban install-skill codex [options]
   input-kanban --version
   input-kanban runs [options]
   input-kanban status [runId] [options]
@@ -255,6 +272,8 @@ Usage:
 
 Agent guide:
   input-kanban guide           Print a friendly agent-oriented control loop and templates
+  input-kanban install-skill codex
+                               Install bundled input-kanban-prepare skill for Codex
 
 Serve options:
   --host <host>              Host to bind, default 127.0.0.1
@@ -296,6 +315,12 @@ Retry options:
 Stop options:
   --runs-dir <path>          Runtime runs directory shared with the Web UI
   --reason <text>            Stop reason stored in run state
+  -j, --json                 Emit JSON output instead of human text
+
+Install skill options:
+  --target-dir <path>        Codex skills root, default $CODEX_SKILLS_DIR or ~/.codex/skills
+  --dry-run                  Print the planned install target without copying files
+  --force                    Replace an existing installed skill directory
   -j, --json                 Emit JSON output instead of human text
 
 Submit options:
@@ -442,11 +467,29 @@ Options:
 `);
 }
 
+function printInstallSkillHelp() {
+  console.log(`input-kanban install-skill
+
+Usage:
+  input-kanban install-skill codex
+  input-kanban install-skill codex --target-dir ~/.codex/skills
+  input-kanban install-skill codex --dry-run
+  input-kanban --json install-skill codex
+
+Options:
+  --target-dir <path>        Codex skills root, default $CODEX_SKILLS_DIR or ~/.codex/skills
+  --dry-run                  Print the planned install target without copying files
+  --force                    Replace an existing installed skill directory
+  -j, --json                 Emit JSON output instead of human text
+`);
+}
+
 function printAgentGuide(json = false) {
   const quickStart = [
     'Use `input-kanban` as the execution tool.',
     'Treat `submit` as a new task identity.',
     'Treat `retry` as a new attempt for the same task.',
+    'If the task came from an external chat, prepare a structured `task.md` first.',
     'Use `status` before any state-dependent action.',
     'Use `result` for the final outcome.',
     'Use `stop` only with a known `runId`.'
@@ -470,6 +513,8 @@ function printAgentGuide(json = false) {
       title: 'Input Kanban Agent Guide',
       quickStart,
       templates,
+      handoffSections: ['Goal', 'Acceptance Criteria', 'Expected Artifacts', 'Context References', 'Risks'],
+      skillInstall: 'input-kanban install-skill codex',
       rules: [
         'submit = new task identity',
         'retry = same task definition, new attempt',
@@ -491,6 +536,16 @@ Core commands:
   status   Inspect current progress before acting
   result   Read the final outcome
   stop     Halt a known run
+
+Preparation before submit:
+  - Goal
+  - Acceptance Criteria
+  - Expected Artifacts
+  - Context References
+  - Risks
+
+Install bundled prepare skill:
+  input-kanban install-skill codex
 
 Example templates:
 ${templates.map((item, index) => `  ${String(index + 1).padStart(2, '0')}. ${item}`).join('\n')}
@@ -752,6 +807,55 @@ async function copyToClipboard(text) {
   throw new Error(`无法复制到剪贴板：${lastError?.message || '未找到可用剪贴板命令'}`);
 }
 
+function homeDir() {
+  if (process.env.HOME) return process.env.HOME;
+  if (process.env.USERPROFILE) return process.env.USERPROFILE;
+  if (process.env.HOMEDRIVE && process.env.HOMEPATH) return `${process.env.HOMEDRIVE}${process.env.HOMEPATH}`;
+  return '';
+}
+
+function defaultCodexSkillsDir() {
+  if (process.env.CODEX_SKILLS_DIR) return path.resolve(process.env.CODEX_SKILLS_DIR);
+  const home = homeDir();
+  if (!home) throw new Error('cannot determine home directory; pass --target-dir');
+  return path.join(home, '.codex', 'skills');
+}
+
+async function pathExists(filePath) {
+  try { await fsp.access(filePath); return true; }
+  catch { return false; }
+}
+
+async function installSkill(args) {
+  const provider = String(args.provider || '').toLowerCase();
+  if (!provider) throw new Error('install-skill requires a provider, currently: codex');
+  if (provider !== 'codex') throw new Error(`unsupported skill provider: ${args.provider}; expected codex`);
+  const sourceDir = fileURLToPath(new URL('../skills/input-kanban-prepare', import.meta.url));
+  const skillsRoot = args.targetDir ? path.resolve(args.targetDir) : defaultCodexSkillsDir();
+  const targetDir = path.join(skillsRoot, 'input-kanban-prepare');
+  const exists = await pathExists(targetDir);
+  const payload = { ok: true, command: 'install-skill', provider, skill: 'input-kanban-prepare', sourceDir, skillsRoot, targetDir, dryRun: !!args.dryRun, installed: false, replaced: false };
+  if (args.dryRun) {
+    if (args.json) { printJson(payload); return; }
+    console.log(`Skill: input-kanban-prepare`);
+    console.log(`Provider: codex`);
+    console.log(`Source: ${sourceDir}`);
+    console.log(`Target: ${targetDir}`);
+    console.log('Dry run: no files copied');
+    return;
+  }
+  if (exists && !args.force) throw new Error(`skill already exists: ${targetDir}; pass --force to replace it`);
+  await fsp.mkdir(skillsRoot, { recursive: true });
+  if (exists && args.force) await fsp.rm(targetDir, { recursive: true, force: true });
+  await fsp.cp(sourceDir, targetDir, { recursive: true });
+  payload.installed = true;
+  payload.replaced = exists && !!args.force;
+  if (args.json) { printJson(payload); return; }
+  console.log(`已安装 Codex skill: input-kanban-prepare`);
+  console.log(`位置: ${targetDir}`);
+  console.log('在 Codex 对话中可尝试使用：use input-kanban-prepare skill');
+}
+
 async function result(args) {
   applyRuntimeEnv(args);
   const runId = args.runId || await latestRunId();
@@ -856,6 +960,11 @@ try {
     args.json = args.json || globals.json;
     if (args.help) { printAgentGuide(args.json); process.exit(0); }
     printAgentGuide(args.json);
+  } else if (command === 'install-skill') {
+    const args = parseInstallSkillArgs(rest);
+    args.json = args.json || globals.json;
+    if (args.help) { printInstallSkillHelp(); process.exit(0); }
+    await installSkill(args);
   } else if (command === 'runs') {
     const args = parseRunsArgs(rest);
     args.json = args.json || globals.json;

@@ -1,5 +1,22 @@
 # Release Notes
 
+## v0.0.18
+
+### Highlights
+
+- Rework the main README files to focus on how to use Input Kanban instead of only describing what it is.
+- Add `skills/input-kanban-prepare/SKILL.md` and `docs/input-kanban-prepare.md` for structured task handoff from external Agent conversations.
+- Add `input-kanban install-skill codex` to install the bundled `input-kanban-prepare` skill into a Codex skills directory.
+- Extend `input-kanban guide` and `input-kanban --help` with a handoff-aware preparation flow and execution template.
+- Teach the planner prompt to treat structured handoff sections such as Goal, Acceptance Criteria, and Expected Artifacts as the execution contract.
+
+### Verification
+
+- `node --test test/cli-submit.test.js` passed locally.
+- `git diff --check` passed locally.
+- `node --check bin/input-kanban.js && node --check src/orchestrator.js` passed locally.
+- Windows-native validation passed on `zhangxing_win` with `npm run check` in the Windows release-candidate working tree.
+
 ## v0.0.17
 
 ### Highlights

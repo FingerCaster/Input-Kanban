@@ -5,10 +5,12 @@ This page is only the entry point.
 Before using `input-kanban` from another project, read:
 
 - `docs/input-kanban-cli-skill.md`
+- `docs/input-kanban-prepare.md` when the task comes from an external Agent conversation
 
 ## What this is for
 
 - Controlled execution through the `input-kanban` CLI
+- Structured handoff from external Agent conversations
 - Status checks, retry handling, result retrieval, and stop control
 - Agent usage in a project that needs stable task execution
 
@@ -17,6 +19,18 @@ Before using `input-kanban` from another project, read:
 - Task decomposition
 - Final acceptance decisions
 - Replacing external gate checks
+
+## Install the bundled prepare skill
+
+```bash
+input-kanban install-skill codex
+```
+
+Use `--target-dir` if your Codex skills root is not `~/.codex/skills`:
+
+```bash
+input-kanban install-skill codex --target-dir /path/to/codex/skills
+```
 
 ## Quick rule
 
