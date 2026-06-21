@@ -34,6 +34,26 @@ test('CLI exposes version output', () => {
   assert.match(cli, /Input Kanban v\$\{PACKAGE_VERSION\} started/);
 });
 
+test('CLI help exposes the agent guide entry point', () => {
+  const helpOutput = runCli(['--help']);
+  assert.match(helpOutput, /input-kanban guide \[options\]/);
+  assert.match(helpOutput, /Agent guide:/);
+});
+
+test('CLI guide prints the agent quick start and JSON form', () => {
+  const guideOutput = runCli(['guide']);
+  assert.match(guideOutput, /Input Kanban Agent Guide/);
+  assert.match(guideOutput, /Quick start:/);
+  assert.match(guideOutput, /input-kanban retry run_1234567890/);
+
+  const jsonOutput = runCli(['--json', 'guide']);
+  const parsed = JSON.parse(jsonOutput);
+  assert.equal(parsed.ok, true);
+  assert.equal(parsed.command, 'guide');
+  assert.equal(parsed.templates.length, 10);
+  assert.match(parsed.templates[0], /input-kanban submit --task/);
+});
+
 test('CLI emits JSON runs output for active discovery', async () => {
   const runsDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-json-runs-'));
   await writeRunState(runsDir, 'run_active', {
@@ -261,7 +281,7 @@ test('CLI emits JSON stop output', async () => {
 });
 
 test('CLI exposes submit auto loop without replacing serve mode', () => {
-  assert.match(cli, /COMMANDS = new Set\(\['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto'\]\)/);
+  assert.match(cli, /COMMANDS = new Set\(\['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide'\]\)/);
   assert.match(cli, /input-kanban v\$\{PACKAGE_VERSION\}/);
   assert.match(cli, /input-kanban --version/);
   assert.match(cli, /input-kanban runs \[options\]/);

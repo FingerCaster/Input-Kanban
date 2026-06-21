@@ -101,6 +101,12 @@ Both passed after the session-management updates.
 
 - Updated `RELEASE_NOTES.md` to record that Windows-native validation passed on `zhangxing_win`.
 
+## GitHub Publish Status
+
+- Version bumped to `v0.0.16`.
+- GitHub release created at `https://github.com/zhang3xing1/Input-Kanban/releases/tag/v0.0.16`.
+- Local `main` was pushed to `origin/main` in commit `a6fe948` (`Release v0.0.16`).
+
 ## Notes
 
 - This repository now has an internal verification record that can be copied into the private knowledge base.

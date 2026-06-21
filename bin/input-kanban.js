@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const PACKAGE_VERSION = JSON.parse(await fsp.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VALID_RUNNERS = ['headless', 'tmux'];
 const VALID_SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'];
-const COMMANDS = new Set(['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto']);
+const COMMANDS = new Set(['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide']);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const STATUS_TEXT = {
   created: '已创建', planning: '拆分中', plan_failed: '拆分失败', plan_empty: '拆分为空', planned: '已拆分',
@@ -167,6 +167,17 @@ function parseAutoArgs(argv) {
   return args;
 }
 
+function parseGuideArgs(argv) {
+  const args = { json: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
+    else throw new Error(`unknown guide argument: ${arg}`);
+  }
+  return args;
+}
+
 function parseSubmitArgs(argv) {
   const args = {
     host: '127.0.0.1', port: 8787, workspace: undefined, repo: undefined, runsDir: undefined, codexBin: undefined,
@@ -234,12 +245,16 @@ Usage:
   input-kanban [options]
   input-kanban serve [options]
   input-kanban submit [options]
+  input-kanban guide [options]
   input-kanban --version
   input-kanban runs [options]
   input-kanban status [runId] [options]
   input-kanban result [runId] [options]
   input-kanban retry <runId> [taskId] [options]
   input-kanban stop <runId> [options]
+
+Agent guide:
+  input-kanban guide           Print a friendly agent-oriented control loop and templates
 
 Serve options:
   --host <host>              Host to bind, default 127.0.0.1
@@ -424,6 +439,64 @@ Options:
   --runner <mode>            Runner mode: headless or tmux
   --poll-ms <ms>             Watch poll interval, default 3000
   -j, --json                 Emit JSON output instead of human text
+`);
+}
+
+function printAgentGuide(json = false) {
+  const quickStart = [
+    'Use `input-kanban` as the execution tool.',
+    'Treat `submit` as a new task identity.',
+    'Treat `retry` as a new attempt for the same task.',
+    'Use `status` before any state-dependent action.',
+    'Use `result` for the final outcome.',
+    'Use `stop` only with a known `runId`.'
+  ];
+  const templates = [
+    'input-kanban submit --task "Implement the new gate workflow" --label "gate-workflow"',
+    'input-kanban submit --task-file task.md',
+    'input-kanban submit --task-file task.md --plan-approval',
+    'input-kanban submit --task-file task.md --detach',
+    'input-kanban status run_1234567890',
+    'input-kanban status run_1234567890 --watch',
+    'input-kanban result run_1234567890',
+    'input-kanban result run_1234567890 --copy',
+    'input-kanban retry run_1234567890',
+    'input-kanban stop run_1234567890'
+  ];
+  if (json) {
+    printJson({
+      ok: true,
+      command: 'guide',
+      title: 'Input Kanban Agent Guide',
+      quickStart,
+      templates,
+      rules: [
+        'submit = new task identity',
+        'retry = same task definition, new attempt',
+        'status = inspect before acting',
+        'result = final confirmation',
+        'stop = only with explicit runId'
+      ]
+    });
+    return;
+  }
+  console.log(`Input Kanban Agent Guide
+
+Quick start:
+${quickStart.map(item => `  - ${item}`).join('\n')}
+
+Core commands:
+  submit   Create a new run for a new task identity
+  retry    Re-attempt the same task definition with a new attempt
+  status   Inspect current progress before acting
+  result   Read the final outcome
+  stop     Halt a known run
+
+Example templates:
+${templates.map((item, index) => `  ${String(index + 1).padStart(2, '0')}. ${item}`).join('\n')}
+
+See also:
+  input-kanban --help
 `);
 }
 
@@ -778,6 +851,11 @@ try {
     args.json = args.json || globals.json;
     if (args.help) { printSubmitHelp(); process.exit(0); }
     await submit(args);
+  } else if (command === 'guide') {
+    const args = parseGuideArgs(rest);
+    args.json = args.json || globals.json;
+    if (args.help) { printAgentGuide(args.json); process.exit(0); }
+    printAgentGuide(args.json);
   } else if (command === 'runs') {
     const args = parseRunsArgs(rest);
     args.json = args.json || globals.json;

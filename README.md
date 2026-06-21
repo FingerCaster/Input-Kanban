@@ -56,6 +56,8 @@ input-kanban submit --task "修复登录问题，并补充回归测试" --label 
 
 `submit` 默认会创建任务批次、发起拆分、自动派发所有批次，并在全部完成后自动发起最终验收。默认 workspace 是当前目录；如果不传 `--label`，任务批次名称会从任务内容自动生成。它使用同一个 runs 目录，所以只要 8787 Web 看板也使用相同的 `--runs-dir`，CLI 创建的任务会在 Web 界面里可见。
 
+如果你的 Agent 只能调用 CLI，可以直接运行 `input-kanban guide` 或 `input-kanban --help`，拿到一版更友好的执行模板和控制循环。
+
 如果希望 Planner 拆分完成后先看一眼计划，再放行执行，可以加计划确认 Gate：
 
 ```bash

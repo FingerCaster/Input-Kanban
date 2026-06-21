@@ -56,6 +56,8 @@ input-kanban submit --task "Fix the login issue and add regression tests" --labe
 
 `submit` creates a run, starts planning, dispatches all batches, and starts the final judge after all workers finish by default. The default workspace is the current directory. If `--label` is omitted, the run label is generated from the task text. It uses the same runs directory, so CLI-created runs are visible in the Web dashboard on port 8787 as long as the dashboard uses the same `--runs-dir`.
 
+If your Agent can only call the CLI, run `input-kanban guide` or `input-kanban --help` to get a friendlier execution template and control loop.
+
 `input-kanban serve` starts a lightweight background scheduler that keeps refreshing and advancing unfinished runs: it dispatches batches when a plan is ready, starts the next serial batch after the previous one completes, and starts the final judge after all batches complete. CLI `submit --auto` / `input-kanban auto <runId>` and the Web server share the same orchestrator auto-advance path, so progress no longer depends on whether a browser page is open or refreshed.
 
 To return immediately and let a background supervisor continue the auto loop, pass `-d` / `--detach`:

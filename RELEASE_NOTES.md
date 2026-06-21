@@ -1,5 +1,19 @@
 # Release Notes
 
+## v0.0.17
+
+### Highlights
+
+- Add a friendly `input-kanban guide` CLI entry that prints an agent-oriented control loop, decision rules, and ready-to-copy execution templates.
+- Extend `input-kanban --help` with a visible agent guide entry point so CLI-only agents can discover the execution flow without reading repository docs.
+- Add a small `docs/input-kanban-cli-README.md` entry page and a reusable `docs/input-kanban-cli-skill.md` execution guide for external-project reuse.
+
+### Verification
+
+- `node --test test/cli-submit.test.js` passed locally.
+- `git diff --check` passed locally.
+- Windows-native validation passed on `zhangxing_win` with `npm run check` in the Windows release-candidate working tree.
+
 ## v0.0.16
 
 ### Highlights
