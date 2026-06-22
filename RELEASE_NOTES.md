@@ -1,5 +1,16 @@
 # Release Notes
 
+## v0.0.19
+
+### Highlights
+
+- Add Codex-compatible YAML frontmatter to the bundled `input-kanban-prepare` skill so installs are immediately discoverable by Codex.
+
+### Verification
+
+- `node --test test/cli-submit.test.js` passed locally.
+- `git diff --check` passed locally.
+
 ## v0.0.18
 
 ### Highlights

@@ -1,3 +1,8 @@
+---
+name: input-kanban-prepare
+description: "Prepare execution-ready task.md handoffs for input-kanban from external Agent conversations."
+---
+
 # input-kanban-prepare
 
 Use this skill when a task discussed in an external Agent conversation needs to be handed off to `input-kanban` for execution.
