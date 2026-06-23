@@ -401,6 +401,109 @@ test('tmux installer --yes reaches the installer branch', async () => {
   }
 });
 
+test('tmux installer resolves the Windows winget executable before spawning', async () => {
+  const previousTmuxBin = process.env.KANBAN_TMUX_BIN;
+  process.env.KANBAN_TMUX_BIN = 'input-kanban-missing-tmux-for-test';
+  const { installTmux } = await import(`../src/deps.js?winget-resolve=${Date.now()}`);
+  const calls = [];
+  const resolvedWinget = 'C:\\Users\\Admin\\AppData\\Local\\Microsoft\\WindowsApps\\winget.exe';
+  const spawnImpl = (command, args, opts) => {
+    calls.push({ command, args, opts });
+    const child = new EventEmitter();
+    queueMicrotask(() => child.emit('exit', 0));
+    return child;
+  };
+  try {
+    await assert.rejects(
+      () => installTmux({
+        yes: true,
+        platform: 'win32',
+        installPlan: { available: true, command: 'winget', args: ['install', '--id', 'marlocarlo.psmux', '-e'], displayCommand: 'winget install --id marlocarlo.psmux -e', packageManager: 'winget' },
+        resolveCommandPathImpl: async command => {
+          assert.equal(command, 'winget');
+          return resolvedWinget;
+        },
+        spawnImpl,
+        log() {}
+      }),
+      /tmux installation command completed, but tmux -V still failed/
+    );
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].command, resolvedWinget);
+    assert.deepEqual(calls[0].args, ['install', '--id', 'marlocarlo.psmux', '-e']);
+    assert.equal(calls[0].opts.shell, false);
+  } finally {
+    if (previousTmuxBin === undefined) delete process.env.KANBAN_TMUX_BIN;
+    else process.env.KANBAN_TMUX_BIN = previousTmuxBin;
+  }
+});
+
+test('tmux installer surfaces Windows winget resolution failures', async () => {
+  const previousTmuxBin = process.env.KANBAN_TMUX_BIN;
+  process.env.KANBAN_TMUX_BIN = 'input-kanban-missing-tmux-for-test';
+  const { installTmux } = await import(`../src/deps.js?winget-resolve-fails=${Date.now()}`);
+  const calls = [];
+  try {
+    await assert.rejects(
+      () => installTmux({
+        yes: true,
+        platform: 'win32',
+        installPlan: { available: true, command: 'winget', args: ['install', '--id', 'marlocarlo.psmux', '-e'], displayCommand: 'winget install --id marlocarlo.psmux -e', packageManager: 'winget' },
+        resolveCommandPathImpl: async () => { throw new Error('where failed'); },
+        spawnImpl: (...args) => {
+          calls.push(args);
+          throw new Error('installer should not run');
+        },
+        log() {}
+      }),
+      /failed to resolve winget executable before installation: where failed/
+    );
+    assert.deepEqual(calls, []);
+  } finally {
+    if (previousTmuxBin === undefined) delete process.env.KANBAN_TMUX_BIN;
+    else process.env.KANBAN_TMUX_BIN = previousTmuxBin;
+  }
+});
+
+test('CLI submit keeps runner local instead of exporting KANBAN_RUNNER to the planner', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-submit-runner-'));
+  const workspace = path.join(tmp, 'workspace');
+  const runsDir = path.join(tmp, 'runs');
+  const capturePath = path.join(tmp, 'planner-env.txt');
+  const codexStub = path.join(tmp, 'codex-stub.js');
+  await fsp.mkdir(workspace, { recursive: true });
+  await fsp.writeFile(codexStub, [
+    "import fs from 'node:fs';",
+    "const outputIndex = process.argv.indexOf('-o');",
+    "if (process.env.KANBAN_ENV_CAPTURE) fs.writeFileSync(process.env.KANBAN_ENV_CAPTURE, process.env.KANBAN_RUNNER || '');",
+    "if (outputIndex >= 0) fs.writeFileSync(process.argv[outputIndex + 1], JSON.stringify({ tasks: [{ id: 'T-01', name: 'noop', prompt: 'noop' }] }));"
+  ].join('\n'));
+  const env = { ...process.env, NODE_NO_WARNINGS: '1', KANBAN_ENV_CAPTURE: capturePath };
+  delete env.KANBAN_RUNNER;
+
+  const output = execFileSync(process.execPath, [
+    cliPath,
+    '--json',
+    'submit',
+    '--task',
+    'noop',
+    '--workspace',
+    workspace,
+    '--runs-dir',
+    runsDir,
+    '--codex-bin',
+    codexStub,
+    '--runner',
+    'headless',
+    '--no-auto'
+  ], { env, encoding: 'utf8' });
+  const parsed = JSON.parse(output);
+  const runState = JSON.parse(await fsp.readFile(path.join(runsDir, parsed.run.runId, 'run_state.json'), 'utf8'));
+
+  assert.equal(runState.runner, 'headless');
+  assert.equal(await fsp.readFile(capturePath, 'utf8'), '');
+});
+
 test('CLI exposes submit auto loop without replacing serve mode', () => {
   assert.match(cli, /COMMANDS = new Set\(\['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide', 'install-skill', 'deps'\]\)/);
   assert.match(cli, /input-kanban v\$\{PACKAGE_VERSION\}/);
@@ -420,6 +523,11 @@ test('CLI exposes submit auto loop without replacing serve mode', () => {
   assert.match(cli, /planApproval: false, auto: true, detach: false, watch: true/);
   assert.match(cli, /arg === '--plan-approval'/);
   assert.match(cli, /planApproval: args\.planApproval/);
+  assert.match(cli, /function applyRunnerEnv\(args\)/);
+  assert.match(cli, /async function serve\(args\) \{[\s\S]*?applyRuntimeEnv\(args\);[\s\S]*?applyRunnerEnv\(args\);/);
+  assert.match(cli, /async function autoRun\(args\) \{[\s\S]*?applyRuntimeEnv\(args\);[\s\S]*?applyRunnerEnv\(args\);/);
+  assert.match(cli, /async function submit\(args\) \{[\s\S]*?applyRuntimeEnv\(args\);[\s\S]*?runner: args\.runner/);
+  assert.match(cli, /runner: args\.runner/);
   assert.match(cli, /async function autoRun\(args\)/);
   assert.match(cli, /function startDetachedAuto\(runId, args\)/);
   assert.match(cli, /async function result\(args\)/);

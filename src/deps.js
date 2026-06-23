@@ -8,7 +8,7 @@ const COMMAND_EXISTS_TIMEOUT_MS = process.platform === 'win32' ? 5000 : 3000;
 async function commandExists(command) {
   try {
     if (process.platform === 'win32') {
-      await execFileAsync('where.exe', [command], { timeout: COMMAND_EXISTS_TIMEOUT_MS, windowsHide: true });
+      await resolveWindowsCommandPath(command);
     } else {
       await execFileAsync('sh', ['-lc', `command -v ${shellWord(command)}`], { timeout: COMMAND_EXISTS_TIMEOUT_MS });
     }
@@ -20,6 +20,20 @@ async function commandExists(command) {
 
 export function shellWord(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
+}
+
+async function resolveWindowsCommandPath(command) {
+  const { stdout } = await execFileAsync('where.exe', [command], { timeout: COMMAND_EXISTS_TIMEOUT_MS, windowsHide: true });
+  return String(stdout || '').split(/\r?\n/).map(line => line.trim()).find(Boolean) || command;
+}
+
+async function commandForSpawn(plan, { platform = process.platform, resolveCommandPathImpl = resolveWindowsCommandPath } = {}) {
+  if (platform !== 'win32' || String(plan?.command || '').toLowerCase() !== 'winget') return plan.command;
+  try {
+    return await resolveCommandPathImpl(plan.command);
+  } catch (error) {
+    throw new Error(`failed to resolve ${plan.command} executable before installation: ${error.message || String(error)}`);
+  }
 }
 
 function plan(command, args, displayCommand, packageManager, notes = []) {
@@ -86,7 +100,7 @@ export async function detectTmuxDependency({ tmuxBin } = {}) {
   };
 }
 
-export async function installTmux({ yes = false, dryRun = false, log = console.log, installPlan = null, spawnImpl = spawn } = {}) {
+export async function installTmux({ yes = false, dryRun = false, log = console.log, installPlan = null, spawnImpl = spawn, platform = process.platform, resolveCommandPathImpl = resolveWindowsCommandPath } = {}) {
   const before = await detectTmuxDependency();
   if (dryRun) {
     const plan = installPlan || before.installPlan || await tmuxInstallPlan();
@@ -103,9 +117,10 @@ export async function installTmux({ yes = false, dryRun = false, log = console.l
   if (!yes) {
     throw new Error(`confirmation required; rerun with --yes after reviewing: ${plan.displayCommand}`);
   }
+  const spawnCommand = await commandForSpawn(plan, { platform, resolveCommandPathImpl });
   await new Promise((resolve, reject) => {
     log(`Running: ${plan.displayCommand}`);
-    const child = spawnImpl(plan.command, plan.args, { stdio: 'inherit', shell: false });
+    const child = spawnImpl(spawnCommand, plan.args, { stdio: 'inherit', shell: false });
     child.on('error', reject);
     child.on('exit', code => code === 0 ? resolve() : reject(new Error(`${plan.command} exited with ${code}`)));
   });
