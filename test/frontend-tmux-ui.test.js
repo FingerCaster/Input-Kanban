@@ -161,6 +161,7 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /tmux 未安装，不能创建 tmux runner 批次。/);
   assert.match(script, /input-kanban deps install tmux/);
   assert.match(html, /id="tmuxDependencyModal"/);
+  assert.match(html, /id="tmuxDependencyNotes"/);
   assert.match(html, /id="showTmuxInstallCommandBtn"/);
   assert.match(html, /id="copyTmuxDependencyCommandBtn"/);
   assert.match(html, /id="planApproval" type="checkbox"/);
@@ -235,7 +236,7 @@ test('create form blocks tmux run creation when tmux is missing', async () => {
   harness.__setApi(async (requestPath, opts = {}) => {
     harness.__calls.push({ kind: 'api', path: requestPath, opts });
     if (requestPath === '/api/tmux') {
-      return { tmux: { installed: false, installAvailable: true, cliInstallCommand: 'input-kanban deps install tmux' } };
+      return { tmux: { installed: false, installAvailable: true, cliInstallCommand: 'input-kanban deps install tmux', installNotes: ['Windows will install psmux, a third-party tmux-compatible implementation, not official tmux.'] } };
     }
     if (requestPath === '/api/runs') return { runId: 'unexpected' };
     return {};
@@ -251,6 +252,7 @@ test('create form blocks tmux run creation when tmux is missing', async () => {
   assert.match(harness.document.getElementById('tmuxDependencyMessage').textContent, /tmux 未安装，不能创建 tmux runner 批次/);
   assert.equal(harness.showTmuxInstallCommandBtn.classList.contains('hidden'), false);
   assert.equal(harness.copyTmuxDependencyCommandBtn.classList.contains('hidden'), true);
+  assert.match(harness.document.getElementById('tmuxDependencyNotes').textContent, /third-party tmux-compatible/);
   harness.__showTmuxInstallCommand();
   assert.equal(harness.document.getElementById('tmuxDependencyCommandWrap').classList.contains('hidden'), false);
   assert.equal(harness.document.getElementById('tmuxDependencyCommand').textContent, 'input-kanban deps install tmux');

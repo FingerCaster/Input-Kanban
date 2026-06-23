@@ -174,6 +174,35 @@ test('listRuns freezes duration after run is judged', async () => {
   assert.equal(summary.durationEnd, '2026-06-10T08:06:00.000Z');
 });
 
+test('listRuns surfaces a load_failed summary for a run with an invalid runner', async () => {
+  const runId = 'run_invalid_runner_state';
+  const runDir = path.join(process.env.KANBAN_RUNS_DIR, runId);
+  await fsp.mkdir(runDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
+    runId,
+    label: 'invalid runner state',
+    repo,
+    workspacePath: repo,
+    runner: 'future-runner',
+    status: 'created',
+    createdAt: '2026-06-10T08:00:00.000Z',
+    updatedAt: '2026-06-10T08:01:00.000Z',
+    planner: { status: 'pending' },
+    batches: [],
+    tasks: [],
+    judge: { status: 'pending' }
+  }, null, 2));
+
+  await assert.rejects(() => loadRun(runId), /invalid runner: future-runner/);
+  const listed = await listRuns({ includeArchived: true });
+  const summary = listed.find(run => run.runId === runId);
+
+  assert.equal(summary.status, 'load_failed');
+  assert.equal(summary.runner, 'future-runner');
+  assert.equal(summary.failed, 1);
+  assert.match(summary.loadError, /invalid runner: future-runner/);
+});
+
 test('markTaskCompleted stores manual success result text', async () => {
   const state = await createRun({ label: 'manual result', repo, taskText: 'noop' });
   const runDir = path.join(process.env.KANBAN_RUNS_DIR, state.runId);

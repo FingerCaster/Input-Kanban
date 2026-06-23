@@ -185,7 +185,7 @@ Web 新建任务批次时也可以选择 runner：
 input-kanban deps install tmux
 ```
 
-安装命令会按平台选择常见包管理器，例如 Windows 的 winget/psmux、macOS 的 Homebrew、Linux 的 apt/dnf/pacman/zypper/apk。执行安装前会展示将运行的命令并要求确认；也可以先查看计划：
+安装命令会按平台选择常见包管理器，例如 Windows 的 winget/psmux、macOS 的 Homebrew、Linux 的 apt/dnf/pacman/zypper/apk。Windows 上的 psmux 是第三方 tmux 兼容实现；也可以自行安装其他实现，只要当前环境里有可用的 `tmux` 命令即可。执行安装前会展示将运行的命令并要求确认；也可以先查看计划：
 
 ```bash
 input-kanban deps install tmux --dry-run

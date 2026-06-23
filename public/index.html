@@ -54,7 +54,7 @@
     .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: var(--gray); line-height: 1.3; }
     .completed, .judged, .planned, .batches_completed { background: var(--green); }
     .running, .planning, .judging { background: var(--blue); }
-    .failed, .plan_failed, .judge_failed, .unknown, .batch_blocked { background: var(--red); }
+    .failed, .plan_failed, .judge_failed, .unknown, .batch_blocked, .load_failed { background: var(--red); }
     .plan_empty { background: var(--orange); }
     .pending, .created { background: var(--gray); }
     .batch-row td { border-top: 3px solid var(--line-strong); background: #101827; font-weight: 800; font-size: 14px; padding-top: 13px; }
@@ -150,6 +150,8 @@
     .tmux-dependency-card { width: min(560px, 100%); }
     .tmux-command-wrap { margin-top: 10px; }
     .tmux-command-wrap.hidden { display: none; }
+    .tmux-dependency-notes { margin-top: 8px; white-space: pre-line; }
+    .tmux-dependency-notes.hidden { display: none; }
     .install-command { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
     .create-runner-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
     .create-runner-row button { margin-bottom: 0; white-space: nowrap; }
@@ -296,6 +298,7 @@
       <div class="modal-title-actions"><button class="secondary modal-close-btn" title="关闭" aria-label="关闭" onclick="closeTmuxDependencyModal()">×</button></div>
     </div>
     <div id="tmuxDependencyMessage" class="notice warning"></div>
+    <div id="tmuxDependencyNotes" class="muted tmux-dependency-notes hidden"></div>
     <div id="tmuxDependencyCommandWrap" class="tmux-command-wrap hidden">
       <label id="tmuxDependencyCommandLabel">安装命令</label>
       <pre id="tmuxDependencyCommand" class="install-command"></pre>
@@ -397,7 +400,8 @@ const statusText = {
   created: '已创建', pending: '等待中', planning: '拆分中', planned: '已拆分',
   running: '执行中', completed: '已完成', failed: '失败', unknown: '未知',
   batches_completed: '批次完成', batch_blocked: '批次阻塞', plan_empty: '拆分为空', stopped: '已停止',
-  judging: '验收中', judged: '已验收', plan_failed: '拆分失败', judge_failed: '验收失败'
+  judging: '验收中', judged: '已验收', plan_failed: '拆分失败', judge_failed: '验收失败',
+  load_failed: '读取失败'
 };
 const roleText = { planner: '任务拆分', judge: '汇总验收' };
 function displayStatus(s) { return statusText[s] || s || '-'; }
@@ -425,7 +429,7 @@ function maxIsoTime(values) {
 }
 function runDurationEnd(s) {
   if (!s) return null;
-  const terminalStatuses = new Set(['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped']);
+  const terminalStatuses = new Set(['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped', 'load_failed']);
   if (!terminalStatuses.has(s.status)) return null;
   return maxIsoTime([
     s.stoppedAt,
@@ -480,6 +484,7 @@ function runCardDurationEnd(run) {
   return run.durationEnd || null;
 }
 function runCardDurationText(run) {
+  if (!run?.createdAt) return '-';
   return formatDurationMs(durationSeconds(run.createdAt, runCardDurationEnd(run)) * 1000);
 }
 function runListHasTmuxMetadata(run) {
@@ -650,8 +655,10 @@ function renderTmuxDependencyModal() {
   const commandWrap = document.getElementById('tmuxDependencyCommandWrap');
   const commandLabel = document.getElementById('tmuxDependencyCommandLabel');
   const command = document.getElementById('tmuxDependencyCommand');
+  const notesEl = document.getElementById('tmuxDependencyNotes');
   const showButton = document.getElementById('showTmuxInstallCommandBtn');
   const copyButton = document.getElementById('copyTmuxDependencyCommandBtn');
+  const notes = installed ? '' : tmuxInstallNotes(tmux).join('\n');
   if (title) title.textContent = installed ? 'tmux 可用' : 'tmux 未安装';
   if (message) {
     message.classList.toggle('warning', !installed);
@@ -661,6 +668,10 @@ function renderTmuxDependencyModal() {
   }
   if (commandLabel) commandLabel.textContent = actionLabel;
   if (command) command.textContent = guidance;
+  if (notesEl) {
+    notesEl.textContent = notes;
+    notesEl.classList.toggle('hidden', !notes);
+  }
   commandWrap?.classList.toggle('hidden', installed || !tmuxDependencyModalState.revealed);
   if (showButton) {
     showButton.textContent = `查看${actionLabel}`;
@@ -806,6 +817,7 @@ function renderRunList() {
         ${metaChip('进度', `${r.completed}/${r.total}`)}
         ${metaChip('执行中', r.running)}
         ${metaChip('失败', r.failed, { danger: Number(r.failed) > 0 })}
+        ${r.loadError ? metaChip('读取错误', r.loadError, { title: r.loadError, danger: true, long: true }) : ''}
       </div>
     </div>`);
   if (latestRuns.length > runListVisibleCount) {

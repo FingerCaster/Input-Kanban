@@ -6,6 +6,7 @@ import { VALID_RUNNERS, normalizeRunner } from './utils.js';
 
 export { VALID_RUNNERS };
 const CONFIG_KEYS = new Set(['defaultRunner']);
+let configWriteQueue = Promise.resolve();
 
 // Config normalization accepts a fallback for persisted/local defaults; runtime
 // runner normalization remains strict in utils.normalizeRunner.
@@ -101,7 +102,7 @@ export async function effectiveRunner() {
   return await configuredDefaultRunner();
 }
 
-export async function updateLocalConfig(patch = {}) {
+async function updateLocalConfigUnlocked(patch = {}) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     const error = new Error('config patch must be a JSON object');
     error.statusCode = 400;
@@ -120,4 +121,11 @@ export async function updateLocalConfig(patch = {}) {
     next.defaultRunner = normalizeRunnerConfig(patch.defaultRunner, 'defaultRunner');
   }
   return await writeLocalConfig(next);
+}
+
+export function updateLocalConfig(patch = {}) {
+  const run = () => updateLocalConfigUnlocked(patch);
+  const next = configWriteQueue.then(run, run);
+  configWriteQueue = next.catch(() => {});
+  return next;
 }
