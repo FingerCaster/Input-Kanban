@@ -11,6 +11,7 @@ import { resolveCodexLauncher } from './codexLauncher.js';
 const require = createRequire(import.meta.url);
 const execFileAsync = promisify(execFile);
 const { version: PACKAGE_VERSION } = require('../package.json');
+export const VALID_RUNNERS = ['headless', 'tmux'];
 
 export const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export { PACKAGE_VERSION };
@@ -20,7 +21,6 @@ export const RUNS_DIR = path.resolve(process.env.KANBAN_RUNS_DIR || path.join(pr
 export const CODEX_BIN = process.env.KANBAN_CODEX_BIN || 'codex';
 export const CODEX_NPM_PACKAGE = '@openai/codex';
 export const CODEX_CHECK_LATEST = process.env.KANBAN_CODEX_CHECK_LATEST === '1';
-export const VALID_RUNNERS = ['headless', 'tmux'];
 
 export function normalizeRunner(value = 'headless', source = 'KANBAN_RUNNER') {
   const runner = String(value || '').trim();
@@ -28,7 +28,7 @@ export function normalizeRunner(value = 'headless', source = 'KANBAN_RUNNER') {
   throw new Error(`invalid ${source}: ${value}; expected one of: ${VALID_RUNNERS.join(', ')}`);
 }
 
-export const RUNNER = normalizeRunner(process.env.KANBAN_RUNNER || 'headless');
+export const RUNNER = 'headless';
 
 export async function ensureDir(dir) { await fsp.mkdir(dir, { recursive: true }); }
 export function nowIso() { return new Date().toISOString(); }

@@ -150,6 +150,7 @@ input-kanban --json status <runId>
 input-kanban --json result <runId>
 input-kanban --json retry <runId> [taskId]
 input-kanban --json stop <runId>
+input-kanban deps tmux
 ```
 
 如果你需要让脚本或其它工具接管，`--json` 会给出结构化输出。
@@ -169,6 +170,26 @@ tmux 模式适合：
 - 想在本地排查执行过程
 
 如果你不需要终端可视化，就继续用默认的 `headless`。
+
+Web 新建任务批次时也可以选择 runner：
+
+- `跟随默认`：使用本机配置里的默认 runner
+- `headless`：当前批次强制使用 headless
+- `tmux`：当前批次强制使用 tmux
+
+默认 runner 会保存到本机配置文件 `~/.input-kanban/config.json`，CLI 和 Web 共用；如果设置了环境变量 `KANBAN_RUNNER`，环境变量优先。
+
+如果 Web 里选择 `tmux` 但本机没有检测到 tmux，会禁止创建批次并提示安装命令。Web 不会直接安装系统依赖；需要在终端里显式执行：
+
+```bash
+input-kanban deps install tmux
+```
+
+安装命令会按平台选择常见包管理器，例如 Windows 的 winget/psmux、macOS 的 Homebrew、Linux 的 apt/dnf/pacman/zypper/apk。执行安装前会展示将运行的命令并要求确认；也可以先查看计划：
+
+```bash
+input-kanban deps install tmux --dry-run
+```
 
 ## 数据会存到哪里
 
@@ -207,6 +228,7 @@ runs/<runId>/
 - Node.js 20 或更高版本
 - 已安装并可用的 Codex CLI
 - 如果要用 `--runner tmux`，本机需要安装 `tmux`
+- 可用 `input-kanban deps tmux` 检查 tmux 状态
 - `codex` 命令在终端可用，或通过 `--codex-bin` 指定可执行文件
 
 ## 维护者开发

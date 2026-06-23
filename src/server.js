@@ -5,7 +5,9 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { CodexAppServerClient } from './appServerClient.js';
-import { APP_ROOT, CODEX_BIN, DEFAULT_WORKSPACE, DEFAULT_REPO, PACKAGE_VERSION, RUNNER, RUNS_DIR, detectCodexInfo } from './utils.js';
+import { APP_ROOT, CODEX_BIN, DEFAULT_WORKSPACE, DEFAULT_REPO, PACKAGE_VERSION, RUNS_DIR, detectCodexInfo, normalizeRunner } from './utils.js';
+import { configPath, effectiveRunner, readLocalConfig, updateLocalConfig } from './config.js';
+import { detectTmuxDependency } from './deps.js';
 import { createRun, listRuns, startPlanner, dispatchRun, startJudge, refreshRun, readRunFile, readRunTaskText, markTaskCompleted, stopRun, archiveRun, renameRun, retryRun } from './orchestrator.js';
 import { startAutoScheduler } from './scheduler.js';
 
@@ -25,7 +27,34 @@ async function readBody(req) {
   for await (const c of req) chunks.push(c);
   const text = Buffer.concat(chunks).toString('utf8');
   if (!text) return {};
-  try { return JSON.parse(text); } catch { return { text }; }
+  try { return JSON.parse(text); } catch (error) {
+    const invalid = new Error(`invalid JSON request body: ${error.message}`);
+    invalid.statusCode = 400;
+    throw invalid;
+  }
+}
+
+async function readJsonObject(req) {
+  const body = await readBody(req);
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    const error = new Error('JSON request body must be an object');
+    error.statusCode = 400;
+    throw error;
+  }
+  return body;
+}
+
+const CREATE_RUN_KEYS = new Set(['label', 'taskText', 'workspace', 'repo', 'maxParallel', 'workerSandbox', 'planApproval', 'requiresPlanApproval', 'runner']);
+
+function sanitizeCreateRunBody(body) {
+  for (const key of Object.keys(body)) {
+    if (!CREATE_RUN_KEYS.has(key)) {
+      const error = new Error(`unsupported create run key: ${key}`);
+      error.statusCode = 400;
+      throw error;
+    }
+  }
+  return body;
 }
 
 function notFound(res) { send(res, 404, { error: 'not found' }); }
@@ -199,10 +228,37 @@ async function handleApi(req, res, url, appClient) {
   const parts = url.pathname.split('/').filter(Boolean);
   try {
     if (req.method === 'GET' && url.pathname === '/api/health') {
-      return send(res, 200, { ok: true, version: PACKAGE_VERSION, appRoot: APP_ROOT, runsDir: RUNS_DIR, defaultWorkspace: DEFAULT_WORKSPACE, defaultRepo: DEFAULT_REPO, runner: RUNNER, codexBin: CODEX_BIN });
+      let runner = 'headless';
+      let configError = '';
+      try {
+        runner = await effectiveRunner();
+      } catch (error) {
+        configError = error?.message || String(error);
+      }
+      return send(res, 200, { ok: true, version: PACKAGE_VERSION, appRoot: APP_ROOT, runsDir: RUNS_DIR, defaultWorkspace: DEFAULT_WORKSPACE, defaultRepo: DEFAULT_REPO, runner, runnerEnvOverride: !!process.env.KANBAN_RUNNER, configError, codexBin: CODEX_BIN });
     }
     if (req.method === 'GET' && url.pathname === '/api/codex') {
       return send(res, 200, { ok: true, codex: await cachedCodexInfo() });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/config') {
+      const config = await readLocalConfig();
+      return send(res, 200, {
+        ok: true,
+        configPath: configPath(),
+        config,
+        effective: { runner: await effectiveRunner(), runnerEnvOverride: !!process.env.KANBAN_RUNNER }
+      });
+    }
+    if (req.method === 'PATCH' && url.pathname === '/api/config') {
+      const body = await readJsonObject(req);
+      if (process.env.KANBAN_RUNNER && Object.hasOwn(body, 'defaultRunner')) {
+        return send(res, 400, { error: 'KANBAN_RUNNER is set; remove the environment override before changing default runner from Web' });
+      }
+      const config = await updateLocalConfig(body);
+      return send(res, 200, { ok: true, configPath: configPath(), config, effective: { runner: await effectiveRunner(), runnerEnvOverride: !!process.env.KANBAN_RUNNER } });
+    }
+    if (req.method === 'GET' && url.pathname === '/api/tmux') {
+      return send(res, 200, { ok: true, tmux: await detectTmuxDependency() });
     }
     if (req.method === 'GET' && url.pathname === '/api/session-management') {
       const limit = Math.min(200, Math.max(1, Number(url.searchParams.get('limit') || 100) || 100));
@@ -217,7 +273,11 @@ async function handleApi(req, res, url, appClient) {
     if (parts[1] === 'runs' && parts.length === 2) {
       if (req.method === 'GET') return send(res, 200, { runs: await listRuns({ includeArchived: url.searchParams.get('includeArchived') === '1', workspace: url.searchParams.get('workspace') || '' }) });
       if (req.method === 'POST') {
-        const body = await readBody(req);
+        const body = sanitizeCreateRunBody(await readJsonObject(req));
+        const hasRunner = Object.hasOwn(body, 'runner');
+        if (hasRunner && !String(body.runner || '').trim()) return send(res, 400, { error: 'runner cannot be empty' });
+        const requestedRunner = hasRunner ? normalizeRunner(body.runner, 'runner') : await effectiveRunner();
+        body.runner = requestedRunner;
         return send(res, 201, await createRun(body));
       }
       return methodNotAllowed(res);
@@ -229,19 +289,19 @@ async function handleApi(req, res, url, appClient) {
       if (parts.length === 4 && parts[3] === 'dispatch' && req.method === 'POST') return send(res, 202, await dispatchRun(runId));
       if (parts.length === 4 && parts[3] === 'judge' && req.method === 'POST') return send(res, 202, await startJudge(runId));
       if (parts.length === 4 && parts[3] === 'retry' && req.method === 'POST') {
-        const body = await readBody(req);
+        const body = await readJsonObject(req);
         return send(res, 200, await retryRun(runId, body));
       }
       if (parts.length === 4 && parts[3] === 'stop' && req.method === 'POST') {
-        const body = await readBody(req);
+        const body = await readJsonObject(req);
         return send(res, 200, await stopRun(runId, body));
       }
       if (parts.length === 4 && parts[3] === 'archive' && req.method === 'POST') {
-        const body = await readBody(req);
+        const body = await readJsonObject(req);
         return send(res, 200, await archiveRun(runId, body));
       }
       if (parts.length === 4 && parts[3] === 'label' && req.method === 'PATCH') {
-        const body = await readBody(req);
+        const body = await readJsonObject(req);
         return send(res, 200, await renameRun(runId, body));
       }
       if (parts.length === 4 && parts[3] === 'task-text' && req.method === 'GET') return send(res, 200, await readRunTaskText(runId), 'text/plain');
@@ -250,13 +310,13 @@ async function handleApi(req, res, url, appClient) {
         return send(res, 200, text, 'text/plain');
       }
       if (parts.length === 6 && parts[3] === 'tasks' && parts[5] === 'mark-completed' && req.method === 'POST') {
-        const body = await readBody(req);
+        const body = await readJsonObject(req);
         return send(res, 200, await markTaskCompleted(runId, parts[4], body));
       }
     }
     notFound(res);
   } catch (e) {
-    send(res, e.statusCode || 500, { error: e.message });
+    send(res, e.statusCode || 500, { error: e.message, ...(e.tmux ? { tmux: e.tmux } : {}) });
   }
 }
 
@@ -269,6 +329,7 @@ export function createHttpServer({ appClient = new CodexAppServerClient() } = {}
 }
 
 export async function startServer({ host = process.env.HOST || '127.0.0.1', port = Number(process.env.PORT || 8787), log = true, scheduler = true } = {}) {
+  const runner = await effectiveRunner().catch(() => 'unavailable');
   const appClient = new CodexAppServerClient();
   const server = createHttpServer({ appClient });
   const autoScheduler = scheduler ? startAutoScheduler({ appClient, log }) : null;
@@ -278,9 +339,12 @@ export async function startServer({ host = process.env.HOST || '127.0.0.1', port
   const stop = async () => {
     autoScheduler?.stop();
     appClient.stop();
-    await new Promise(resolve => server.close(resolve));
+    const closePromise = new Promise(resolve => server.close(resolve));
+    server.closeIdleConnections?.();
+    server.closeAllConnections?.();
+    await closePromise;
   };
-  return { server, appClient, autoScheduler, host, port, url, version: PACKAGE_VERSION, defaultWorkspace: DEFAULT_WORKSPACE, defaultRepo: DEFAULT_REPO, runsDir: RUNS_DIR, runner: RUNNER, scheduler: !!autoScheduler, stop };
+  return { server, appClient, autoScheduler, host, port, url, version: PACKAGE_VERSION, defaultWorkspace: DEFAULT_WORKSPACE, defaultRepo: DEFAULT_REPO, runsDir: RUNS_DIR, runner, scheduler: !!autoScheduler, stop };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -16,13 +16,15 @@ function createFrontendHarness() {
         innerHTML: '',
         textContent: '',
         value: '',
-        classList: { add() {}, remove() {} },
+        checked: false,
+        classList: { add() {}, remove() {}, toggle() {} },
         setAttribute() {},
         addEventListener() {}
       });
     }
     return elements.get(id);
   };
+  const globalElementIds = ['label', 'repo', 'runsDir', 'runnerMode', 'maxParallel', 'workerSandbox', 'planApproval', 'taskText'];
   const context = {
     console: { error() {} },
     localStorage: { getItem() { return ''; }, setItem() {} },
@@ -31,7 +33,8 @@ function createFrontendHarness() {
     setTimeout(fn) { if (typeof fn === 'function') fn(); },
     requestAnimationFrame(fn) { if (typeof fn === 'function') fn(); },
     alert(message) { calls.push({ kind: 'alert', message }); },
-    confirm() { calls.push({ kind: 'confirm' }); return true; },
+    confirm(message) { calls.push({ kind: 'confirm', message }); return true; },
+    prompt(title, value) { calls.push({ kind: 'prompt', title, value }); return value; },
     calls,
     fetch: async (requestPath, opts = {}) => {
       calls.push({ kind: 'fetch', path: requestPath, opts });
@@ -42,14 +45,24 @@ function createFrontendHarness() {
     refreshRuns: async () => { calls.push({ kind: 'refreshRuns' }); },
     refreshSelected: async () => { calls.push({ kind: 'refreshSelected' }); }
   };
+  for (const id of globalElementIds) context[id] = elementForId(id);
+  context.label.value = 'codex-task';
+  context.repo.value = '/tmp/input-kanban';
+  context.runnerMode.value = 'default';
+  context.maxParallel.value = '3';
+  context.workerSandbox.value = 'workspace-write';
+  context.taskText.value = 'noop';
   const bootScript = script
-    .replace(/\ninitializeWorkerSandboxPreference\(\);\nrenderActionToolbar\(\);\nloadCodexStatus\(\)\.catch\(console\.error\);\nloadHealth\(\)\.then\(refreshRuns\);\nsetInterval\(\(\) => \{ if \(selectedRun\) refreshSelected\(\{auto:true\}\)\.catch\(console\.error\); else refreshRuns\(\)\.catch\(console\.error\); \}, AUTO_REFRESH_MS\);\s*$/, '');
+    .replace(/\r?\ninitializeWorkerSandboxPreference\(\);\r?\ninitSessionManagementResize\(\);\r?\nrenderActionToolbar\(\);\r?\nloadCodexStatus\(\)\.catch\(console\.error\);\r?\nloadAppConfig\(\)\.catch\(console\.error\);\r?\nrefreshTmuxStatus\(\)\.catch\(console\.error\);\r?\nloadHealth\(\)\.then\(refreshRuns\);\r?\nsetInterval\(\(\) => \{ if \(selectedRun\) refreshSelected\(\{auto:true\}\)\.catch\(console\.error\); else refreshRuns\(\)\.catch\(console\.error\); \}, AUTO_REFRESH_MS\);\s*$/, '');
   vm.runInNewContext(`${bootScript}
 api = async (requestPath, opts = {}) => { calls.push({ kind: 'api', path: requestPath, opts }); return {}; };
 refreshSelected = async () => { calls.push({ kind: 'refreshSelected' }); };
 globalThis.__setRun = (runId, state) => { selectedRun = runId; currentState = state; };
 globalThis.__runActionState = runActionState;
 globalThis.__dispatchRun = dispatchRun;
+globalThis.__createRun = createRun;
+globalThis.__hasRunTmuxMetadata = hasRunTmuxMetadata;
+globalThis.__setApi = nextApi => { api = nextApi; };
 globalThis.__calls = calls;`, context);
   return context;
 }
@@ -65,7 +78,7 @@ test('header, browser tab, and footer show Input Kanban identity', () => {
   assert.match(html, /<link rel="mask-icon" href="\/assets\/input-kanban-mask-icon\.svg" color="#2563eb" \/>/);
   assert.match(html, /<link rel="apple-touch-icon" sizes="180x180" href="\/assets\/input-kanban-apple-touch-icon\.png\?v=2" \/>/);
   assert.match(html, /<h1 class="brand"><img class="brand-icon" src="\/assets\/input-kanban-icon\.png"/);
-  assert.match(html, /<footer class="page-footer"><div id="pageFooter">版本：-<\/div><div id="codexStatus" class="codex-status hidden"><\/div><button id="sessionManagementTrigger" class="secondary session-management-trigger" onclick="openSessionManagement\(\)">会话管理<\/button><\/footer>/);
+  assert.match(html, /<footer class="page-footer"><div id="pageFooter">版本：-<\/div><div id="codexStatus" class="codex-status hidden"><\/div><div class="footer-actions"><button id="environmentTrigger" class="secondary environment-trigger" onclick="openEnvironmentModal\(\)">环境<\/button><button id="sessionManagementTrigger" class="secondary session-management-trigger" onclick="openSessionManagement\(\)">会话管理<\/button><\/div><\/footer>/);
   assert.match(script, /sessionManagementThreadTitle/);
   assert.match(script, /sessionManagementShortId/);
   assert.match(script, /sessionManagementTab = 'board'/);
@@ -120,6 +133,21 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /codex\.versionText \|\| codex\.installedVersion \|\| 'codex'/);
   assert.doesNotMatch(script, /后端命令 <code>/);
   assert.match(html, /<select id="workerSandbox">/);
+  assert.match(html, /<select id="runnerMode">/);
+  assert.match(html, /<option value="default" selected>跟随默认<\/option>/);
+  assert.match(html, /<option value="tmux">tmux<\/option>/);
+  assert.match(html, /id="runnerHint"/);
+  assert.match(html, /id="environmentModal"/);
+  assert.match(html, /id="defaultRunnerSelect"/);
+  assert.match(html, /id="tmuxStatus"/);
+  assert.match(script, /async function loadAppConfig\(\{ force = false \} = \{\}\)/);
+  assert.match(script, /api\('\/api\/config'\)/);
+  assert.match(script, /api\('\/api\/tmux'\)/);
+  assert.match(script, /async function ensureAppConfigLoaded\(\)/);
+  assert.match(script, /async function ensureRunnerSelectionReady\(\)/);
+  assert.match(script, /async function ensureTmuxForCreate\(\)/);
+  assert.match(script, /tmux 未安装，不能创建 tmux runner 批次。/);
+  assert.match(script, /input-kanban deps install tmux/);
   assert.match(html, /id="planApproval" type="checkbox"/);
   assert.doesNotMatch(html, /sessionManagementSourceFilter/);
   assert.match(html, /本机 Codex 进程/);
@@ -148,7 +176,8 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /function initializeWorkerSandboxPreference\(\)/);
   assert.match(script, /localStorage\.getItem\(WORKER_SANDBOX_STORAGE_KEY\)/);
   assert.match(script, /select\.addEventListener\('change', saveWorkerSandboxPreference\)/);
-  assert.match(script, /saveWorkerSandboxPreference\(\);\n  const body = \{ label: label\.value/);
+  assert.match(script, /saveWorkerSandboxPreference\(\);\r?\n  if \(!await ensureRunnerSelectionReady\(\)\) return;\r?\n  if \(!await ensureTmuxForCreate\(\)\) return;\r?\n  const body = \{ label: label\.value/);
+  assert.match(script, /runner: selectedRunnerMode\(\)/);
   assert.match(html, /<div id="actionToolbar" class="toolbar"><\/div>/);
   assert.match(html, /button\.state-pending/);
   assert.match(html, /button\.state-active/);
@@ -183,6 +212,110 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /await archiveRunById\(runId, \{ confirmFirst: false \}\)/);
   assert.match(script, /metaChip\('沙箱', sandbox/);
   assert.match(script, /danger: sandbox === 'danger-full-access'/);
+});
+
+test('create form blocks tmux run creation when tmux is missing', async () => {
+  const harness = createFrontendHarness();
+  harness.runnerMode.value = 'tmux';
+  harness.__setApi(async (requestPath, opts = {}) => {
+    harness.__calls.push({ kind: 'api', path: requestPath, opts });
+    if (requestPath === '/api/tmux') {
+      return { tmux: { installed: false, installAvailable: true, cliInstallCommand: 'input-kanban deps install tmux' } };
+    }
+    if (requestPath === '/api/runs') return { runId: 'unexpected' };
+    return {};
+  });
+
+  await harness.__createRun();
+
+  assert.deepEqual(harness.__calls.filter(call => call.kind === 'api').map(call => call.path), ['/api/tmux']);
+  assert.equal(harness.__calls.some(call => call.kind === 'api' && call.path === '/api/runs'), false);
+  const confirm = harness.__calls.find(call => call.kind === 'confirm');
+  assert.match(confirm.message, /tmux 未安装，不能创建 tmux runner 批次/);
+  const prompt = harness.__calls.find(call => call.kind === 'prompt');
+  assert.equal(prompt.value, 'input-kanban deps install tmux');
+});
+
+test('create form shows manual tmux guidance when no installer is available', async () => {
+  const harness = createFrontendHarness();
+  harness.runnerMode.value = 'tmux';
+  harness.__setApi(async (requestPath, opts = {}) => {
+    harness.__calls.push({ kind: 'api', path: requestPath, opts });
+    if (requestPath === '/api/tmux') {
+      return { tmux: { installed: false, installAvailable: false, installNotes: ['Install psmux manually or install winget first.'], installHint: 'winget missing' } };
+    }
+    if (requestPath === '/api/runs') return { runId: 'unexpected' };
+    return {};
+  });
+
+  await harness.__createRun();
+
+  assert.equal(harness.__calls.some(call => call.kind === 'api' && call.path === '/api/runs'), false);
+  const confirm = harness.__calls.find(call => call.kind === 'confirm');
+  assert.match(confirm.message, /安装指引/);
+  const prompt = harness.__calls.find(call => call.kind === 'prompt');
+  assert.match(prompt.title, /安装指引/);
+  assert.equal(prompt.value, 'Install psmux manually or install winget first.');
+});
+
+test('run attach affordance requires a live tmux session flag', () => {
+  const harness = createFrontendHarness();
+  assert.equal(harness.__hasRunTmuxMetadata({
+    runner: 'tmux',
+    tmux: {
+      hasTmuxSession: false,
+      tmuxSessionName: 'input-kanban-run_dead',
+      tmuxAttachCommand: 'tmux attach-session -t input-kanban-run_dead'
+    }
+  }), false);
+  assert.equal(harness.__hasRunTmuxMetadata({
+    runner: 'tmux',
+    tmux: {
+      hasTmuxSession: true,
+      tmuxSessionName: 'input-kanban-run_live'
+    }
+  }), true);
+});
+
+test('create form loads the default runner before following it', async () => {
+  const harness = createFrontendHarness();
+  harness.runnerMode.value = 'default';
+  harness.__setApi(async (requestPath, opts = {}) => {
+    harness.__calls.push({ kind: 'api', path: requestPath, opts });
+    if (requestPath === '/api/config') {
+      return { config: { defaultRunner: 'tmux' }, effective: { runner: 'tmux', runnerEnvOverride: false } };
+    }
+    if (requestPath === '/api/tmux') {
+      return { tmux: { installed: false, installAvailable: true, cliInstallCommand: 'input-kanban deps install tmux' } };
+    }
+    if (requestPath === '/api/runs') return { runId: 'unexpected' };
+    return {};
+  });
+
+  await harness.__createRun();
+
+  assert.deepEqual(harness.__calls.filter(call => call.kind === 'api').map(call => call.path), ['/api/config', '/api/tmux']);
+  assert.equal(harness.__calls.some(call => call.kind === 'api' && call.path === '/api/runs'), false);
+  assert.match(harness.__calls.find(call => call.kind === 'confirm').message, /tmux 未安装/);
+});
+
+test('create form does not require config loading for explicit headless runner', async () => {
+  const harness = createFrontendHarness();
+  harness.runnerMode.value = 'headless';
+  harness.__setApi(async (requestPath, opts = {}) => {
+    harness.__calls.push({ kind: 'api', path: requestPath, opts });
+    if (requestPath === '/api/config') throw new Error('config should not be required');
+    if (requestPath === '/api/runs') return { runId: 'run_headless' };
+    return {};
+  });
+
+  await harness.__createRun();
+
+  const apiPaths = harness.__calls.filter(call => call.kind === 'api').map(call => call.path);
+  assert.equal(apiPaths.includes('/api/config'), false);
+  assert.equal(apiPaths[0], '/api/runs');
+  const createCall = harness.__calls.find(call => call.kind === 'api' && call.path === '/api/runs');
+  assert.equal(JSON.parse(createCall.opts.body).runner, 'headless');
 });
 
 test('run action state maps reachable statuses to executable actions', () => {

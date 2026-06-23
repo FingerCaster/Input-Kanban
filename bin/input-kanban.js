@@ -3,11 +3,12 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline/promises';
 
 const PACKAGE_VERSION = JSON.parse(await fsp.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VALID_RUNNERS = ['headless', 'tmux'];
 const VALID_SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'];
-const COMMANDS = new Set(['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide', 'install-skill']);
+const COMMANDS = new Set(['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide', 'install-skill', 'deps']);
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const STATUS_TEXT = {
   created: '已创建', planning: '拆分中', plan_failed: '拆分失败', plan_empty: '拆分为空', planned: '已拆分',
@@ -194,6 +195,23 @@ function parseInstallSkillArgs(argv) {
   return args;
 }
 
+function parseDepsArgs(argv) {
+  const args = { action: 'status', dependency: undefined, yes: false, dryRun: false, json: false, help: false };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--help' || arg === '-h') args.help = true;
+    else if (arg === '--json' || arg === '-j') args.json = true;
+    else if (arg === '--yes' || arg === '-y') args.yes = true;
+    else if (arg === '--dry-run') args.dryRun = true;
+    else if (arg === 'install' && args.action === 'status') args.action = 'install';
+    else if (!arg.startsWith('-') && !args.dependency) args.dependency = arg;
+    else throw new Error(`unknown deps argument: ${arg}`);
+  }
+  args.dependency = args.dependency || 'tmux';
+  if (args.dependency !== 'tmux') throw new Error(`unsupported dependency: ${args.dependency}; expected tmux`);
+  return args;
+}
+
 function parseSubmitArgs(argv) {
   const args = {
     host: '127.0.0.1', port: 8787, workspace: undefined, repo: undefined, runsDir: undefined, codexBin: undefined,
@@ -263,6 +281,7 @@ Usage:
   input-kanban submit [options]
   input-kanban guide [options]
   input-kanban install-skill codex [options]
+  input-kanban deps [install] tmux [options]
   input-kanban --version
   input-kanban runs [options]
   input-kanban status [runId] [options]
@@ -321,6 +340,14 @@ Install skill options:
   --target-dir <path>        Codex skills root, default $CODEX_SKILLS_DIR or ~/.codex/skills
   --dry-run                  Print the planned install target without copying files
   --force                    Replace an existing installed skill directory
+  -j, --json                 Emit JSON output instead of human text
+
+Deps options:
+  input-kanban deps tmux
+  input-kanban deps install tmux --dry-run
+  input-kanban deps install tmux --yes
+  --dry-run                  Print the platform install plan without running it
+  -y, --yes                  Confirm and run the install command
   -j, --json                 Emit JSON output instead of human text
 
 Submit options:
@@ -480,6 +507,22 @@ Options:
   --target-dir <path>        Codex skills root, default $CODEX_SKILLS_DIR or ~/.codex/skills
   --dry-run                  Print the planned install target without copying files
   --force                    Replace an existing installed skill directory
+  -j, --json                 Emit JSON output instead of human text
+`);
+}
+
+function printDepsHelp() {
+  console.log(`input-kanban deps
+
+Usage:
+  input-kanban deps tmux
+  input-kanban deps install tmux
+  input-kanban deps install tmux --dry-run
+  input-kanban deps install tmux --yes
+
+Options:
+  --dry-run                  Print the platform install plan without running it
+  -y, --yes                  Confirm and run the install command
   -j, --json                 Emit JSON output instead of human text
 `);
 }
@@ -856,6 +899,78 @@ async function installSkill(args) {
   console.log('在 Codex 对话中可尝试使用：use input-kanban-prepare skill');
 }
 
+async function confirmTerminalInstall(displayCommand) {
+  if (!process.stdin.isTTY) return false;
+  console.log('即将执行安装命令:');
+  console.log(`  ${displayCommand}`);
+  console.log('请输入 yes 确认安装，其他输入将取消。');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await rl.question('> ');
+    return answer.trim().toLowerCase() === 'yes';
+  } finally {
+    rl.close();
+  }
+}
+
+function tmuxInstallNotesFrom(value = {}) {
+  return value.installNotes || value.installPlan?.notes || value.notes || [];
+}
+
+function printTmuxInstallGuidance(value = {}) {
+  if (value.installAvailable || value.available) {
+    const command = value.installCommand || value.displayCommand || value.installPlan?.displayCommand || '';
+    if (command) console.log(`平台命令: ${command}`);
+    return;
+  }
+  const notes = tmuxInstallNotesFrom(value);
+  if (notes.length) {
+    console.log('手动安装指引:');
+    for (const note of notes) console.log(`  - ${note}`);
+  }
+}
+
+function tmuxManualInstallMessage(value = {}) {
+  const notes = tmuxInstallNotesFrom(value);
+  return notes.length ? notes.join(' ') : (value.installHint || value.platform || process.platform);
+}
+
+async function deps(args) {
+  const { detectTmuxDependency, installTmux } = await import('../src/deps.js');
+  if (args.action === 'status') {
+    const status = await detectTmuxDependency();
+    if (args.json) { printJson({ ok: true, command: 'deps', dependency: 'tmux', status }); return; }
+    console.log(`tmux: ${status.installed ? status.version || 'installed' : 'not installed'}`);
+    if (!status.installed) {
+      if (status.installAvailable) console.log(`安装命令: input-kanban deps install tmux`);
+      printTmuxInstallGuidance(status);
+    }
+    return;
+  }
+
+  if (!args.yes && !args.dryRun) {
+    const status = await detectTmuxDependency();
+    if (status.installed) {
+      if (args.json) { printJson({ ok: true, command: 'deps', dependency: 'tmux', installed: true, alreadyInstalled: true, status }); return; }
+      console.log(`tmux 已安装: ${status.version || status.tmuxBin}`);
+      return;
+    }
+    if (!status.installAvailable) throw new Error(`当前平台未找到可自动执行的 tmux 安装器: ${tmuxManualInstallMessage(status)}`);
+    const confirmed = await confirmTerminalInstall(status.installCommand);
+    if (!confirmed) throw new Error('installation cancelled; rerun with --yes to confirm non-interactively');
+    args.yes = true;
+  }
+
+  const result = await installTmux({ yes: args.yes, dryRun: args.dryRun });
+  if (args.json) { printJson({ ok: true, command: 'deps', action: 'install', dependency: 'tmux', result }); return; }
+  if (result.dryRun) {
+    if (result.installPlan?.available) console.log(`安装计划: ${result.installPlan.displayCommand}`);
+    else printTmuxInstallGuidance(result.installPlan || {});
+    return;
+  }
+  console.log(result.alreadyInstalled ? `tmux 已安装: ${result.after.version || result.after.tmuxBin}` : `tmux 安装完成: ${result.after.version || result.after.tmuxBin}`);
+}
+
 async function result(args) {
   applyRuntimeEnv(args);
   const runId = args.runId || await latestRunId();
@@ -965,6 +1080,11 @@ try {
     args.json = args.json || globals.json;
     if (args.help) { printInstallSkillHelp(); process.exit(0); }
     await installSkill(args);
+  } else if (command === 'deps') {
+    const args = parseDepsArgs(rest);
+    args.json = args.json || globals.json;
+    if (args.help) { printDepsHelp(); process.exit(0); }
+    await deps(args);
   } else if (command === 'runs') {
     const args = parseRunsArgs(rest);
     args.json = args.json || globals.json;

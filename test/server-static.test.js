@@ -89,6 +89,126 @@ test('server exposes local codex process list', async () => {
   }
 });
 
+test('server exposes local config and tmux dependency status', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-server-config-'));
+  const previousConfigPath = process.env.KANBAN_CONFIG_PATH;
+  const previousRunner = process.env.KANBAN_RUNNER;
+  process.env.KANBAN_CONFIG_PATH = path.join(tmp, 'config.json');
+  delete process.env.KANBAN_RUNNER;
+  const instance = await startServer({ host: '127.0.0.1', port: 0, log: false, scheduler: false });
+  const address = instance.server.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const initial = await (await fetch(`${baseUrl}/api/config`)).json();
+    assert.equal(initial.ok, true);
+    assert.equal(initial.effective.runner, 'headless');
+    assert.equal(initial.effective.runnerEnvOverride, false);
+
+    const updated = await (await fetch(`${baseUrl}/api/config`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ defaultRunner: 'tmux' })
+    })).json();
+    assert.equal(updated.config.defaultRunner, 'tmux');
+    assert.equal(updated.effective.runner, 'tmux');
+
+    const malformedResponse = await fetch(`${baseUrl}/api/config`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{bad json'
+    });
+    const malformed = await malformedResponse.json();
+    assert.equal(malformedResponse.status, 400);
+    assert.match(malformed.error, /invalid JSON request body/);
+
+    const unknownKeyResponse = await fetch(`${baseUrl}/api/config`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runner: 'headless' })
+    });
+    const unknownKey = await unknownKeyResponse.json();
+    assert.equal(unknownKeyResponse.status, 400);
+    assert.match(unknownKey.error, /unsupported config key: runner/);
+
+    for (const invalidBody of ['null', '[]', '"runner"']) {
+      const invalidShapeResponse = await fetch(`${baseUrl}/api/config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: invalidBody
+      });
+      const invalidShape = await invalidShapeResponse.json();
+      assert.equal(invalidShapeResponse.status, 400);
+      assert.match(invalidShape.error, /JSON request body must be an object/);
+    }
+
+    const invalidRunResponse = await fetch(`${baseUrl}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '[]'
+    });
+    const invalidRun = await invalidRunResponse.json();
+    assert.equal(invalidRunResponse.status, 400);
+    assert.match(invalidRun.error, /JSON request body must be an object/);
+
+    const emptyRunnerResponse = await fetch(`${baseUrl}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runner: '', taskText: 'noop', repo: tmp })
+    });
+    const emptyRunner = await emptyRunnerResponse.json();
+    assert.equal(emptyRunnerResponse.status, 400);
+    assert.match(emptyRunner.error, /runner cannot be empty/);
+
+    const internalHookResponse = await fetch(`${baseUrl}/api/runs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runner: 'tmux', tmuxDependencyChecker: {}, taskText: 'noop', repo: tmp })
+    });
+    const internalHook = await internalHookResponse.json();
+    assert.equal(internalHookResponse.status, 400);
+    assert.match(internalHook.error, /unsupported create run key: tmuxDependencyChecker/);
+
+    const tmux = await (await fetch(`${baseUrl}/api/tmux`)).json();
+    assert.equal(tmux.ok, true);
+    assert.equal(tmux.tmux.dependency, 'tmux');
+    assert.equal(tmux.tmux.cliInstallCommand, 'input-kanban deps install tmux');
+  } finally {
+    await instance.stop();
+    if (previousConfigPath === undefined) delete process.env.KANBAN_CONFIG_PATH;
+    else process.env.KANBAN_CONFIG_PATH = previousConfigPath;
+    if (previousRunner === undefined) delete process.env.KANBAN_RUNNER;
+    else process.env.KANBAN_RUNNER = previousRunner;
+  }
+});
+
+test('server reports a corrupted local config instead of silently falling back', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-server-bad-config-'));
+  const previousConfigPath = process.env.KANBAN_CONFIG_PATH;
+  const previousRunner = process.env.KANBAN_RUNNER;
+  process.env.KANBAN_CONFIG_PATH = path.join(tmp, 'config.json');
+  delete process.env.KANBAN_RUNNER;
+  await fsp.writeFile(process.env.KANBAN_CONFIG_PATH, '{bad json');
+  const instance = await startServer({ host: '127.0.0.1', port: 0, log: false, scheduler: false });
+  const address = instance.server.address();
+  assert.ok(address && typeof address === 'object');
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+
+  try {
+    const response = await fetch(`${baseUrl}/api/config`);
+    const body = await response.json();
+    assert.equal(response.status, 500);
+    assert.match(body.error, /invalid Input Kanban config/);
+  } finally {
+    await instance.stop();
+    if (previousConfigPath === undefined) delete process.env.KANBAN_CONFIG_PATH;
+    else process.env.KANBAN_CONFIG_PATH = previousConfigPath;
+    if (previousRunner === undefined) delete process.env.KANBAN_RUNNER;
+    else process.env.KANBAN_RUNNER = previousRunner;
+  }
+});
+
 test('server caches /api/codex detection for a short TTL and reports missing codex', async () => {
   const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-server-codex-cache-'));
   const codexStub = path.join(tmp, 'missing-codex.js');

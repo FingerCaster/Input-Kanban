@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -39,6 +40,7 @@ test('CLI help exposes the agent guide entry point', () => {
   const helpOutput = runCli(['--help']);
   assert.match(helpOutput, /input-kanban guide \[options\]/);
   assert.match(helpOutput, /input-kanban install-skill codex \[options\]/);
+  assert.match(helpOutput, /input-kanban deps \[install\] tmux \[options\]/);
   assert.match(helpOutput, /Agent guide:/);
 });
 
@@ -308,8 +310,95 @@ test('CLI emits JSON stop output', async () => {
   assert.equal(parsed.reason, 'stopped from CLI');
 });
 
+test('CLI reports tmux dependency status and dry-run install plan', () => {
+  const statusOutput = runCli(['--json', 'deps', 'tmux']);
+  const status = JSON.parse(statusOutput);
+  assert.equal(status.ok, true);
+  assert.equal(status.command, 'deps');
+  assert.equal(status.dependency, 'tmux');
+  assert.equal(status.status.dependency, 'tmux');
+  assert.equal(status.status.cliInstallCommand, 'input-kanban deps install tmux');
+
+  const dryRunOutput = runCli(['--json', 'deps', 'install', 'tmux', '--dry-run']);
+  const dryRun = JSON.parse(dryRunOutput);
+  assert.equal(dryRun.ok, true);
+  assert.equal(dryRun.action, 'install');
+  assert.equal(dryRun.result.dryRun, true);
+  assert.equal(typeof dryRun.result.installPlan.available, 'boolean');
+  assert.equal(typeof dryRun.result.installPlan.displayCommand, 'string');
+  assert.match(cli, /function printTmuxInstallGuidance/);
+  assert.match(cli, /手动安装指引:/);
+});
+
+test('tmux dry-run install plan preserves manual install notes', async () => {
+  const { installTmux } = await import(`../src/deps.js?manual-notes=${Date.now()}`);
+  const result = await installTmux({
+    dryRun: true,
+    installPlan: {
+      available: false,
+      packageManager: '',
+      displayCommand: '',
+      notes: ['Install psmux manually or install winget first.']
+    }
+  });
+
+  assert.equal(result.dryRun, true);
+  assert.equal(result.installPlan.available, false);
+  assert.deepEqual(result.installPlan.notes, ['Install psmux manually or install winget first.']);
+});
+
+test('tmux installer refuses to run without explicit confirmation', async () => {
+  const previousTmuxBin = process.env.KANBAN_TMUX_BIN;
+  process.env.KANBAN_TMUX_BIN = 'input-kanban-missing-tmux-for-test';
+  const { installTmux } = await import(`../src/deps.js?confirm-gate=${Date.now()}`);
+  const calls = [];
+  try {
+    await assert.rejects(
+      () => installTmux({
+        installPlan: { available: true, command: 'fake-installer', args: ['tmux'], displayCommand: 'fake-installer tmux', packageManager: 'fake' },
+        spawnImpl: (...args) => { calls.push(args); throw new Error('installer should not run'); }
+      }),
+      /confirmation required/
+    );
+    assert.deepEqual(calls, []);
+  } finally {
+    if (previousTmuxBin === undefined) delete process.env.KANBAN_TMUX_BIN;
+    else process.env.KANBAN_TMUX_BIN = previousTmuxBin;
+  }
+});
+
+test('tmux installer --yes reaches the installer branch', async () => {
+  const previousTmuxBin = process.env.KANBAN_TMUX_BIN;
+  process.env.KANBAN_TMUX_BIN = 'input-kanban-missing-tmux-for-test';
+  const { installTmux } = await import(`../src/deps.js?yes-gate=${Date.now()}`);
+  const calls = [];
+  const spawnImpl = (command, args, opts) => {
+    calls.push({ command, args, opts });
+    const child = new EventEmitter();
+    queueMicrotask(() => child.emit('exit', 0));
+    return child;
+  };
+  try {
+    await assert.rejects(
+      () => installTmux({
+        yes: true,
+        installPlan: { available: true, command: 'fake-installer', args: ['tmux'], displayCommand: 'fake-installer tmux', packageManager: 'fake' },
+        spawnImpl,
+        log() {}
+      }),
+      /tmux installation command completed, but tmux -V still failed/
+    );
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].args, ['tmux']);
+    assert.equal(calls[0].opts.shell, false);
+  } finally {
+    if (previousTmuxBin === undefined) delete process.env.KANBAN_TMUX_BIN;
+    else process.env.KANBAN_TMUX_BIN = previousTmuxBin;
+  }
+});
+
 test('CLI exposes submit auto loop without replacing serve mode', () => {
-  assert.match(cli, /COMMANDS = new Set\(\['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide', 'install-skill'\]\)/);
+  assert.match(cli, /COMMANDS = new Set\(\['serve', 'submit', 'runs', 'status', 'result', 'retry', 'stop', 'auto', 'guide', 'install-skill', 'deps'\]\)/);
   assert.match(cli, /input-kanban v\$\{PACKAGE_VERSION\}/);
   assert.match(cli, /input-kanban --version/);
   assert.match(cli, /input-kanban runs \[options\]/);
@@ -349,6 +438,9 @@ test('CLI exposes submit auto loop without replacing serve mode', () => {
   assert.match(cli, /任务批次: \$\{state\.label/);
   assert.match(cli, /状态 \$\{displayStatus\(state\.status\)\}/);
   assert.match(cli, /input-kanban status <runId> --watch/);
+  assert.match(cli, /function parseDepsArgs\(argv\)/);
+  assert.match(cli, /async function deps\(args\)/);
+  assert.match(cli, /input-kanban deps install tmux --dry-run/);
 });
 
 test('README focuses on friendly usage and structured handoff', () => {
