@@ -147,6 +147,10 @@
     .environment-value select { max-width: 260px; }
     .environment-status { color: #cbd5e1; font-size: 12px; }
     .environment-status.warning { color: #fbbf24; }
+    .tmux-dependency-card { width: min(560px, 100%); }
+    .tmux-command-wrap { margin-top: 10px; }
+    .tmux-command-wrap.hidden { display: none; }
+    .install-command { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
     .create-runner-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
     .create-runner-row button { margin-bottom: 0; white-space: nowrap; }
     .file-content-wrap { position: relative; }
@@ -285,6 +289,24 @@
     </div>
   </div>
 </div>
+<div id="tmuxDependencyModal" class="modal-backdrop hidden" onclick="closeTmuxDependencyModal(event)">
+  <div class="modal-card tmux-dependency-card" onclick="event.stopPropagation()">
+    <div class="modal-title-row">
+      <h2 id="tmuxDependencyTitle">tmux 未安装</h2>
+      <div class="modal-title-actions"><button class="secondary modal-close-btn" title="关闭" aria-label="关闭" onclick="closeTmuxDependencyModal()">×</button></div>
+    </div>
+    <div id="tmuxDependencyMessage" class="notice warning"></div>
+    <div id="tmuxDependencyCommandWrap" class="tmux-command-wrap hidden">
+      <label id="tmuxDependencyCommandLabel">安装命令</label>
+      <pre id="tmuxDependencyCommand" class="install-command"></pre>
+    </div>
+    <div class="toolbar">
+      <button id="showTmuxInstallCommandBtn" onclick="showTmuxInstallCommand()">查看安装命令</button>
+      <button id="copyTmuxDependencyCommandBtn" class="secondary hidden" onclick="copyTmuxDependencyCommand(event)">复制安装命令</button>
+      <button class="secondary" onclick="closeTmuxDependencyModal()">关闭</button>
+    </div>
+  </div>
+</div>
 <div id="sessionManagementModal" class="modal-backdrop hidden" onclick="closeSessionManagement(event)">
   <div id="sessionManagementModalCard" class="modal-card" onclick="event.stopPropagation()">
     <div class="modal-title-row">
@@ -346,6 +368,7 @@ let selectedWorkspaceFilter = localStorage.getItem('input-kanban.workspaceFilter
 let appConfigState = { effectiveRunner: 'headless', runnerEnvOverride: false, defaultRunner: 'headless', loaded: false };
 let appConfigLoadPromise = null;
 let tmuxDependencyState = null;
+let tmuxDependencyModalState = { tmux: null, guidance: '', revealed: false };
 
 async function api(path, opts={}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -614,8 +637,73 @@ function tmuxInstallGuidance(tmux = tmuxDependencyState) {
   if (tmux.installAvailable && tmux.cliInstallCommand) return tmux.cliInstallCommand;
   return tmuxInstallNotes(tmux).join('\n') || tmux.installHint || '';
 }
-function tmuxInstallPromptTitle(tmux = tmuxDependencyState) {
-  return tmux?.installAvailable ? '复制 tmux 安装命令' : '复制 tmux 安装指引';
+function tmuxInstallActionLabel(tmux = tmuxDependencyState) {
+  return tmux?.installAvailable ? '安装命令' : '安装指引';
+}
+function renderTmuxDependencyModal() {
+  const tmux = tmuxDependencyModalState.tmux || tmuxDependencyState;
+  const installed = !!tmux?.installed;
+  const guidance = tmuxDependencyModalState.guidance || tmuxInstallGuidance(tmux) || 'input-kanban deps install tmux';
+  const actionLabel = tmuxInstallActionLabel(tmux);
+  const title = document.getElementById('tmuxDependencyTitle');
+  const message = document.getElementById('tmuxDependencyMessage');
+  const commandWrap = document.getElementById('tmuxDependencyCommandWrap');
+  const commandLabel = document.getElementById('tmuxDependencyCommandLabel');
+  const command = document.getElementById('tmuxDependencyCommand');
+  const showButton = document.getElementById('showTmuxInstallCommandBtn');
+  const copyButton = document.getElementById('copyTmuxDependencyCommandBtn');
+  if (title) title.textContent = installed ? 'tmux 可用' : 'tmux 未安装';
+  if (message) {
+    message.classList.toggle('warning', !installed);
+    message.textContent = installed
+      ? `tmux 可用: ${tmux.version || tmux.tmuxBin || '已安装'}`
+      : `tmux 未安装，不能创建 tmux runner 批次。选择查看${actionLabel}后，在终端中执行对应命令；也可以关闭后改用 headless。`;
+  }
+  if (commandLabel) commandLabel.textContent = actionLabel;
+  if (command) command.textContent = guidance;
+  commandWrap?.classList.toggle('hidden', installed || !tmuxDependencyModalState.revealed);
+  if (showButton) {
+    showButton.textContent = `查看${actionLabel}`;
+    showButton.classList.toggle('hidden', installed || tmuxDependencyModalState.revealed);
+  }
+  if (copyButton) {
+    copyButton.textContent = `复制${actionLabel}`;
+    copyButton.classList.toggle('hidden', installed || !tmuxDependencyModalState.revealed);
+  }
+}
+function openTmuxDependencyModal(tmux, { revealed = false } = {}) {
+  tmuxDependencyState = tmux || tmuxDependencyState;
+  tmuxDependencyModalState = {
+    tmux: tmuxDependencyState,
+    guidance: tmuxInstallGuidance(tmuxDependencyState) || 'input-kanban deps install tmux',
+    revealed
+  };
+  renderTmuxStatus();
+  renderTmuxDependencyModal();
+  document.getElementById('tmuxDependencyModal')?.classList.remove('hidden');
+}
+function closeTmuxDependencyModal(event) {
+  if (event?.target && event.target.id !== 'tmuxDependencyModal') return;
+  document.getElementById('tmuxDependencyModal')?.classList.add('hidden');
+}
+function showTmuxInstallCommand() {
+  tmuxDependencyModalState.revealed = true;
+  renderTmuxDependencyModal();
+}
+async function copyTmuxDependencyCommand(event) {
+  const command = tmuxDependencyModalState.guidance || tmuxInstallGuidance() || 'input-kanban deps install tmux';
+  try {
+    await navigator.clipboard.writeText(command);
+    if (event?.currentTarget) {
+      const label = event.currentTarget.textContent;
+      event.currentTarget.textContent = '已复制';
+      setTimeout(() => { event.currentTarget.textContent = label; }, 900);
+    }
+  } catch {
+    tmuxDependencyModalState.revealed = true;
+    renderTmuxDependencyModal();
+    if (event?.currentTarget) event.currentTarget.textContent = '请手动复制';
+  }
 }
 async function copyTmuxInstallCommand(event) {
   const command = tmuxInstallGuidance() || 'input-kanban deps install tmux';
@@ -626,16 +714,11 @@ async function copyTmuxInstallCommand(event) {
       setTimeout(() => { event.currentTarget.textContent = tmuxDependencyState?.installAvailable ? '复制安装命令' : '复制安装指引'; }, 900);
     }
   } catch {
-    prompt(tmuxInstallPromptTitle(), command);
+    openTmuxDependencyModal(tmuxDependencyState, { revealed: true });
   }
 }
 function showTmuxInstallPrompt(tmux) {
-  tmuxDependencyState = tmux || tmuxDependencyState;
-  renderTmuxStatus();
-  const guidance = tmuxInstallGuidance() || 'input-kanban deps install tmux';
-  const actionLabel = tmuxDependencyState?.installAvailable ? '安装命令' : '安装指引';
-  const ok = confirm(`tmux 未安装，不能创建 tmux runner 批次。\n\n选择“确定”查看${actionLabel}，或取消后改用 headless。`);
-  if (ok) prompt(tmuxInstallPromptTitle(), guidance);
+  openTmuxDependencyModal(tmux, { revealed: false });
 }
 async function ensureTmuxForCreate() {
   if (selectedRunnerMode() !== 'tmux') return true;
@@ -646,7 +729,7 @@ async function ensureTmuxForCreate() {
 }
 async function checkTmuxFromCreate() {
   const tmux = await refreshTmuxStatus();
-  if (tmux?.installed) alert(`tmux 可用: ${tmux.version || tmux.tmuxBin}`);
+  if (tmux?.installed) openTmuxDependencyModal(tmux);
   else showTmuxInstallPrompt(tmux);
 }
 function showCreateForm() {

@@ -18,6 +18,7 @@ import {
   tmuxSelectLayout,
   tmuxSplitWindow
 } from '../src/tmux.js';
+import { shellWord } from '../src/deps.js';
 import { createDefaultRunner, createHeadlessRunner, createTmuxRunner, headlessRunner } from '../src/runners/index.js';
 
 function makeRunner(handler) {
@@ -39,6 +40,10 @@ test('sanitizes tmux names deterministically with shell-safe characters', () => 
   assert.equal(longName, sanitizeTmuxName('a'.repeat(120), { maxLength: 32 }));
   assert.match(longName, /^[a-zA-Z0-9._-]+$/);
   assert.ok(longName.length <= 32);
+});
+
+test('shellWord quotes single quotes for POSIX shells', () => {
+  assert.equal(shellWord("it's"), "'it'\\''s'");
 });
 
 test('ensureTmuxAvailable returns a clear error when tmux cannot run', async () => {

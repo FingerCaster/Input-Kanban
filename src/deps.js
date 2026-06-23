@@ -3,13 +3,14 @@ import { promisify } from 'node:util';
 import { checkTmuxAvailable, DEFAULT_TMUX_BIN } from './tmux.js';
 
 const execFileAsync = promisify(execFile);
+const COMMAND_EXISTS_TIMEOUT_MS = process.platform === 'win32' ? 5000 : 3000;
 
 async function commandExists(command) {
   try {
     if (process.platform === 'win32') {
-      await execFileAsync('where.exe', [command], { timeout: 3000, windowsHide: true });
+      await execFileAsync('where.exe', [command], { timeout: COMMAND_EXISTS_TIMEOUT_MS, windowsHide: true });
     } else {
-      await execFileAsync('sh', ['-lc', `command -v ${shellWord(command)}`], { timeout: 3000 });
+      await execFileAsync('sh', ['-lc', `command -v ${shellWord(command)}`], { timeout: COMMAND_EXISTS_TIMEOUT_MS });
     }
     return true;
   } catch {
@@ -17,7 +18,7 @@ async function commandExists(command) {
   }
 }
 
-function shellWord(value) {
+export function shellWord(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
@@ -108,6 +109,6 @@ export async function installTmux({ yes = false, dryRun = false, log = console.l
     child.on('exit', code => code === 0 ? resolve() : reject(new Error(`${plan.command} exited with ${code}`)));
   });
   const after = await detectTmuxDependency();
-  if (!after.installed) throw new Error('tmux installation command completed, but tmux -V still failed');
+  if (!after.installed) throw new Error('tmux installation command completed, but tmux -V still failed. If the installer changed PATH, open a new terminal and run detection again.');
   return { ok: true, dependency: 'tmux', installed: true, alreadyInstalled: false, installPlan: plan, before, after };
 }

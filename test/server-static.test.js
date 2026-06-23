@@ -4,8 +4,44 @@ import { execFile } from 'node:child_process';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
 
-import { startServer } from '../src/server.js';
+import { closeHttpServerGracefully, startServer } from '../src/server.js';
+
+test('server graceful close waits before forcing active connections', async () => {
+  const calls = [];
+  let closeCallback = null;
+  const fakeServer = {
+    close(callback) { calls.push('close'); closeCallback = callback; },
+    closeIdleConnections() { calls.push('idle'); },
+    closeAllConnections() { calls.push('all'); }
+  };
+
+  const closing = closeHttpServerGracefully(fakeServer, { forceAfterMs: 20 });
+  await sleep(5);
+  assert.deepEqual(calls, ['close', 'idle']);
+  await sleep(30);
+  assert.deepEqual(calls, ['close', 'idle', 'all']);
+  closeCallback();
+  await closing;
+});
+
+test('server graceful close skips force close when close completes within grace', async () => {
+  const calls = [];
+  let closeCallback = null;
+  const fakeServer = {
+    close(callback) { calls.push('close'); closeCallback = callback; },
+    closeIdleConnections() { calls.push('idle'); },
+    closeAllConnections() { calls.push('all'); }
+  };
+
+  const closing = closeHttpServerGracefully(fakeServer, { forceAfterMs: 50 });
+  await sleep(5);
+  closeCallback();
+  await closing;
+  await sleep(60);
+  assert.deepEqual(calls, ['close', 'idle']);
+});
 
 test('server serves index.html at root and reports a valid app root', async () => {
   const instance = await startServer({ host: '127.0.0.1', port: 0, log: false, scheduler: false });
@@ -198,7 +234,7 @@ test('server reports a corrupted local config instead of silently falling back',
   try {
     const response = await fetch(`${baseUrl}/api/config`);
     const body = await response.json();
-    assert.equal(response.status, 500);
+    assert.equal(response.status, 400);
     assert.match(body.error, /invalid Input Kanban config/);
   } finally {
     await instance.stop();

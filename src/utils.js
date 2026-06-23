@@ -28,6 +28,11 @@ export function normalizeRunner(value = 'headless', source = 'KANBAN_RUNNER') {
   throw new Error(`invalid ${source}: ${value}; expected one of: ${VALID_RUNNERS.join(', ')}`);
 }
 
+/**
+ * @deprecated Use configuredDefaultRunner/effectiveRunner for defaults, or
+ * normalizeRunner for explicit runner values. This legacy export remains only
+ * for older external consumers that import RUNNER directly.
+ */
 export const RUNNER = 'headless';
 
 export async function ensureDir(dir) { await fsp.mkdir(dir, { recursive: true }); }

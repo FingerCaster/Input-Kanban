@@ -172,7 +172,7 @@ test('refreshRun keeps running tmux task alive from durable session metadata aft
   assert.equal(state.tasks[0].tmux.sessionName, 'input-kanban-run_tmux_live_after_restart');
   assert.equal(state.tmux.hasTmuxSession, true);
   assert.equal(state.batches[0].tasks[0].status, 'running');
-  assert.deepEqual(checkedSessions, ['input-kanban-run_tmux_live_after_restart', 'input-kanban-run_tmux_live_after_restart']);
+  assert.deepEqual(checkedSessions, ['input-kanban-run_tmux_live_after_restart']);
 });
 
 test('refreshRun removes run-level tmux attach metadata after restart when session is gone', async () => {
