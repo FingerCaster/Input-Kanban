@@ -67,6 +67,15 @@ test('checkTmuxAvailable rejects non-tmux binaries that return success', async (
   assert.match(status.result.stdout, /PowerShell/);
 });
 
+test('checkTmuxAvailable accepts psmux tmux-compatible version output', async () => {
+  const { runner } = makeRunner(() => ({ code: 0, stdout: 'psmux 3.3.6\n' }));
+
+  const status = await checkTmuxAvailable({ tmuxBin: 'tmux', runner });
+
+  assert.equal(status.available, true);
+  assert.equal(status.version, 'psmux 3.3.6');
+});
+
 test('tmuxHasSession checks availability before checking the session', async () => {
   const { calls, runner } = makeRunner((_command, args) => {
     if (args[0] === '-V') return { code: 0, stdout: 'tmux 3.4\n' };

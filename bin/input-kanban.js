@@ -261,6 +261,9 @@ function applyRuntimeEnv(args) {
   }
   if (args.runsDir) process.env.KANBAN_RUNS_DIR = path.resolve(args.runsDir);
   if (args.codexBin) process.env.KANBAN_CODEX_BIN = args.codexBin;
+}
+
+function applyRunnerEnv(args) {
   if (args.runner) process.env.KANBAN_RUNNER = args.runner;
 }
 
@@ -732,6 +735,7 @@ async function watchRun(runId, { auto = false, pollMs = 3000, quiet = false, max
 
 async function serve(args) {
   applyRuntimeEnv(args);
+  applyRunnerEnv(args);
   const { startServer } = await import('../src/server.js');
   const instance = await startServer({ host: process.env.HOST, port: Number(process.env.PORT || 8787), log: false });
   if (args.json) {
@@ -1009,6 +1013,7 @@ async function stop(args) {
 
 async function autoRun(args) {
   applyRuntimeEnv(args);
+  applyRunnerEnv(args);
   if (!args.runId) throw new Error('auto requires a runId');
   const { loadRun, startPlanner, summaryOfRun } = await import('../src/orchestrator.js');
   const state = await loadRun(args.runId);
@@ -1024,6 +1029,7 @@ async function submit(args) {
   applyRuntimeEnv(args);
   const taskText = await readTaskText(args);
   const { createRun, startPlanner, summaryOfRun } = await import('../src/orchestrator.js');
+  // Keep submit's one-off runner choice local to run creation.
   const state = await createRun({
     label: args.label,
     taskText,
@@ -1031,7 +1037,8 @@ async function submit(args) {
     repo: process.env.KANBAN_DEFAULT_REPO,
     maxParallel: args.maxParallel,
     workerSandbox: args.workerSandbox,
-    planApproval: args.planApproval
+    planApproval: args.planApproval,
+    runner: args.runner
   });
   if (!args.json) {
     console.log(`已创建任务批次: ${state.runId}`);
