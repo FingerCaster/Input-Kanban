@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
+import { isActiveRunSummaryStatus, isFailureRunStatus, isTerminalRunStatus } from '../src/status.js';
 
 const PACKAGE_VERSION = JSON.parse(await fsp.readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const VALID_RUNNERS = ['headless', 'tmux'];
@@ -13,7 +14,7 @@ const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const STATUS_TEXT = {
   created: '已创建', planning: '拆分中', plan_failed: '拆分失败', plan_empty: '拆分为空', planned: '已拆分',
   running: '执行中', batch_blocked: '批次阻塞', batches_completed: '批次完成', judging: '验收中', judged: '已验收',
-  judge_failed: '验收失败', stopped: '已停止'
+  judge_failed: '验收失败', stopped: '已停止', load_failed: '加载失败'
 };
 
 function validateChoice(value, source, choices) {
@@ -676,17 +677,17 @@ function printRunsTable(runs) {
 }
 
 function isTerminal(state) {
-  return ['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(state.status);
+  return isTerminalRunStatus(state.status);
 }
 
 function isFailureTerminal(state) {
-  return ['judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(state.status);
+  return isFailureRunStatus(state.status);
 }
 
 function isActiveRunSummary(run) {
   if (!run) return false;
   if (Number(run.running) > 0) return true;
-  return !['judged', 'judge_failed', 'plan_failed', 'plan_empty', 'stopped'].includes(run.status);
+  return isActiveRunSummaryStatus(run.status);
 }
 
 function hasRecoverableUnknownTask(state) {

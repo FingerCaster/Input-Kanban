@@ -13,6 +13,7 @@ import { formatCodexEventsJsonl } from './eventFormatter.js';
 import { createDefaultRunner } from './runners/index.js';
 import { effectiveRunner } from './config.js';
 import { detectTmuxDependency } from './deps.js';
+import { isAutoAdvanceableRunStatus, isFailureRunStatus, isTerminalRunStatus } from './status.js';
 import { tmuxHasSession } from './tmux.js';
 
 const execFileAsync = promisify(execFile);
@@ -342,12 +343,10 @@ function runMatchesWorkspace(run, workspaceFilter) {
   return runWorkspace === workspaceFilter;
 }
 
-export function isTerminalRunStatus(status) {
-  return ['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped', 'load_failed'].includes(status);
-}
+export { isFailureRunStatus, isTerminalRunStatus };
 
-export function isFailureRunStatus(status) {
-  return ['judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped', 'load_failed'].includes(status);
+function isInvalidStoredRunnerError(error) {
+  return error?.code === 'INVALID_RUNNER' && error?.source === 'runner';
 }
 
 export async function listRuns({ includeArchived = false, workspace = '' } = {}) {
@@ -961,9 +960,15 @@ export async function autoAdvanceActiveRuns({ appClient = null, startCreated = f
   const results = [];
   for (const dir of dirs) {
     const runId = path.basename(dir);
+    let initial;
     try {
-      const initial = await loadRun(runId);
-      if (!initial || initial.archived || ['judged', 'judge_failed', 'plan_failed', 'plan_empty', 'stopped'].includes(initial.status)) continue;
+      initial = await loadRun(runId);
+    } catch (error) {
+      if (!isInvalidStoredRunnerError(error)) results.push({ runId, ok: false, error: error.message || String(error) });
+      continue;
+    }
+    try {
+      if (!initial || initial.archived || !isAutoAdvanceableRunStatus(initial.status)) continue;
       const state = await autoAdvanceRun(runId, { appClient, startCreated, maxRetries, retryReason });
       if (state) results.push({ runId, status: state.status, ok: true });
     } catch (error) {
