@@ -6,21 +6,36 @@ import { promisify } from 'node:util';
 import {
   DEFAULT_WORKSPACE, DEFAULT_REPO, RUNS_DIR, ensureDir, nowIso, makeRunId, readJson,
   writeJsonAtomic, fileInfo, readTextMaybe, extractFirstJsonObject, listRunDirs,
-  pathForRun, roleDir, safeIdPart, RUNNER
+  pathForRun, roleDir, safeIdPart, normalizeRunner
 } from './utils.js';
 import { matchThreadToMarkers } from './appServerClient.js';
 import { formatCodexEventsJsonl } from './eventFormatter.js';
-import { defaultRunner } from './runners/index.js';
+import { createDefaultRunner } from './runners/index.js';
+import { effectiveRunner } from './config.js';
+import { detectTmuxDependency } from './deps.js';
+import { tmuxHasSession } from './tmux.js';
 
 const execFileAsync = promisify(execFile);
-const runner = defaultRunner;
+const runnerCache = new Map();
 const VALID_SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 const MISSING_RUNNER_GRACE_MS = 10000;
 const MAX_DERIVED_LABEL_DISPLAY_WIDTH = 40;
 const RUN_STATE_LOCK_NAME = 'run_state.lock';
 const RUN_STATE_LOCK_STALE_MS = 30000;
 const RUN_STATE_LOCK_TIMEOUT_MS = 30000;
+const LEGACY_DEFAULT_RUNNER = 'headless';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function assertRunnerDependencies(runnerMode, { tmuxDependencyChecker = detectTmuxDependency } = {}) {
+  if (runnerMode !== 'tmux') return;
+  const tmux = await tmuxDependencyChecker();
+  if (!tmux.installed) {
+    const error = new Error('tmux runner requires tmux to be installed');
+    error.statusCode = 400;
+    error.tmux = tmux;
+    throw error;
+  }
+}
 
 function normalizeSandbox(value, fallback = 'workspace-write') {
   const sandbox = String(value || '').trim();
@@ -33,6 +48,29 @@ function planPath(runDir) { return path.join(runDir, 'plan.json'); }
 function lockPath(runDir) { return path.join(runDir, RUN_STATE_LOCK_NAME); }
 function workspacePathOf(state) { return path.resolve(state?.workspacePath || state?.repo || DEFAULT_WORKSPACE || DEFAULT_REPO); }
 function workspaceNameOf(state) { return state?.workspaceName || path.basename(workspacePathOf(state)) || workspacePathOf(state); }
+function runnerForMode(mode = LEGACY_DEFAULT_RUNNER) {
+  const normalized = normalizeRunner(mode || LEGACY_DEFAULT_RUNNER, 'runner');
+  if (!runnerCache.has(normalized)) runnerCache.set(normalized, createDefaultRunner(normalized));
+  return runnerCache.get(normalized);
+}
+function runnerForState(state) {
+  return runnerForMode(state?.runner || LEGACY_DEFAULT_RUNNER);
+}
+async function resolveRunRunner(requestedRunner) {
+  if (process.env.KANBAN_RUNNER) {
+    const envRunner = normalizeRunner(process.env.KANBAN_RUNNER, 'KANBAN_RUNNER');
+    if (requestedRunner) {
+      const normalizedRequest = normalizeRunner(requestedRunner, 'runner');
+      if (normalizedRequest !== envRunner) {
+        const error = new Error(`KANBAN_RUNNER is set to ${envRunner}; requested runner ${normalizedRequest} is not allowed`);
+        error.statusCode = 400;
+        throw error;
+      }
+    }
+    return envRunner;
+  }
+  return requestedRunner ? normalizeRunner(requestedRunner, 'runner') : await effectiveRunner();
+}
 async function detectWorkspaceMetadata(workspacePath) {
   const resolvedWorkspace = path.resolve(workspacePath || DEFAULT_WORKSPACE || DEFAULT_REPO || process.cwd());
   const metadata = {
@@ -169,8 +207,21 @@ function isPidAlive(pid) {
   }
 }
 
-function hasLiveRunnerProcess(state, id, target) {
-  return runner.hasRunning(state.runId, id) || isPidAlive(target?.pid);
+async function hasDurableTmuxSession(state, target, options = {}) {
+  const tmux = target?.tmux;
+  if ((state.runner || LEGACY_DEFAULT_RUNNER) !== 'tmux' && tmux?.runner !== 'tmux') return false;
+  const sessionName = tmux?.sessionName || tmux?.target?.split(':')[0] || state.tmux?.tmuxSessionName || '';
+  if (!sessionName) return false;
+  try {
+    const sessionChecker = options.tmuxSessionChecker || tmuxHasSession;
+    return await sessionChecker(sessionName, {});
+  } catch {
+    return false;
+  }
+}
+
+async function hasLiveRunnerProcess(state, id, target, options = {}) {
+  return runnerForState(state).hasRunning(state.runId, id) || isPidAlive(target?.pid) || await hasDurableTmuxSession(state, target, options);
 }
 
 function stopPid(pid, signal = 'SIGTERM') {
@@ -241,12 +292,14 @@ function approvePlanGate(state, approvedBy = 'local-user') {
   return true;
 }
 
-export async function createRun({ label = '', taskText = '', workspace = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write', planApproval = false, requiresPlanApproval = false } = {}) {
+export async function createRun({ label = '', taskText = '', workspace = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write', planApproval = false, requiresPlanApproval = false, runner: runRunner, tmuxDependencyChecker = detectTmuxDependency } = {}) {
   const resolvedWorkspace = await assertWorkspacePath(workspace || repo || DEFAULT_WORKSPACE);
   const workspaceMeta = await detectWorkspaceMetadata(resolvedWorkspace);
   const runLabel = deriveRunLabel(label, taskText);
   const runId = makeRunId(runLabel);
   const runDir = pathForRun(runId);
+  const selectedRunner = await resolveRunRunner(runRunner);
+  await assertRunnerDependencies(selectedRunner, { tmuxDependencyChecker });
   await ensureDir(runDir);
   await fsp.writeFile(path.join(runDir, 'task.md'), taskText || '');
   const state = {
@@ -264,7 +317,7 @@ export async function createRun({ label = '', taskText = '', workspace = '', rep
     maxParallel: Number(maxParallel) || 3,
     workerSandbox: normalizeSandbox(workerSandbox),
     gates: { planApproval: normalizePlanApprovalGate(planApproval || requiresPlanApproval) },
-    runner: RUNNER,
+    runner: selectedRunner,
     status: 'created', createdAt: nowIso(), updatedAt: nowIso(),
     planner: { status: 'pending' }, batches: [], tasks: [], judge: { status: 'pending' }
   };
@@ -310,6 +363,7 @@ export async function loadRun(runId) {
   const state = await readJson(statePath(pathForRun(runId)), null);
   if (state) {
     normalizeWorkspaceState(state);
+    state.runner = normalizeRunner(state.runner || LEGACY_DEFAULT_RUNNER, 'runner');
     if (!state.git || typeof state.git.isGit !== 'boolean') {
       const workspaceMeta = await detectWorkspaceMetadata(workspacePathOf(state));
       state.git = workspaceMeta;
@@ -434,7 +488,8 @@ export async function startPlanner(runId) {
     await fsp.rm(planPath(runDir), { force: true });
     const taskText = await fsp.readFile(path.join(runDir, 'task.md'), 'utf8');
     const prompt = defaultPlannerPrompt(state, taskText);
-    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
+    const activeRunner = runnerForState(state);
+    const child = await activeRunner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
     state.status = 'planning';
     state.planner = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir, attempt: (state.plannerAttempts?.length || 0) + 1 };
     await saveRun(state);
@@ -666,7 +721,8 @@ ORCHESTRATOR_BATCH_ID: ${task.batchId || 'batch-1'}
 
 ${task.prompt}${workerArtifactInstructions(state, task)}${upstreamArtifactInstructions(state, task)}
 `;
-  const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, batchId: task.batchId || 'batch-1', runStatePath: statePath(runDir), prompt: fullPrompt, sandbox: task.sandbox || state.workerSandbox || 'workspace-write', cwd: workspacePathOf(state), outDir });
+  const activeRunner = runnerForState(state);
+  const child = await activeRunner.startCodexTask({ runId: state.runId, taskId: task.id, batchId: task.batchId || 'batch-1', runStatePath: statePath(runDir), prompt: fullPrompt, sandbox: task.sandbox || state.workerSandbox || 'workspace-write', cwd: workspacePathOf(state), outDir });
   Object.assign(task, { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir });
 }
 
@@ -675,7 +731,7 @@ export async function stopRun(runId, { reason = 'stopped by user' } = {}) {
     const state = await loadRun(runId);
     if (!state) throw new Error(`run not found: ${runId}`);
     const stoppedAt = nowIso();
-    await runner.stopRun(runId);
+    await runnerForState(state).stopRun(runId);
     const stoppedPids = new Set();
     const stopTargetPid = target => {
       const pid = Number(target?.pid);
@@ -831,7 +887,8 @@ export async function startJudge(runId) {
     const judgeInput = await buildJudgeInput(state);
     await writeJsonAtomic(judgeInputPath, judgeInput);
     const prompt = defaultJudgePrompt(state, judgeInputPath);
-    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
+    const activeRunner = runnerForState(state);
+    const child = await activeRunner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
     const previousJudgeAttempts = [
       ...(state.judgeAttempts || []).map(item => Number(item.attempt || 0)),
       Number(state.judge?.attempt || 0)
@@ -854,8 +911,8 @@ export async function startJudge(runId) {
   });
 }
 
-export async function refreshRun(runId, appClient = null) {
-  return await loadAndRefreshRun(runId, appClient, { light: false });
+export async function refreshRun(runId, appClient = null, options = {}) {
+  return await loadAndRefreshRun(runId, appClient, { light: false, ...options });
 }
 
 export async function autoAdvanceRun(runId, { appClient = null, startCreated = false, maxRetries = 1, retryReason = 'auto retry from scheduler' } = {}) {
@@ -903,17 +960,18 @@ export async function autoAdvanceActiveRuns({ appClient = null, startCreated = f
   return results;
 }
 
-async function loadAndRefreshRun(runId, appClient = null, { light = false } = {}) {
+async function loadAndRefreshRun(runId, appClient = null, { light = false, tmuxSessionChecker = null } = {}) {
   return await withRunStateLock(runId, async () => {
     const state = await loadRun(runId);
     if (!state) return null;
-    state.runner = state.runner || RUNNER;
-    await refreshRole(state, state.planner, roleDir(pathForRun(runId), 'planner'));
+    const refreshOptions = { tmuxSessionChecker };
+    state.runner = normalizeRunner(state.runner || LEGACY_DEFAULT_RUNNER, 'runner');
+    await refreshRole(state, state.planner, roleDir(pathForRun(runId), 'planner'), refreshOptions);
     await recoverCompletedPlanner(state);
-    for (const task of state.tasks || []) await refreshTask(state, task);
-    await refreshRole(state, state.judge, roleDir(pathForRun(runId), 'judge'));
+    for (const task of state.tasks || []) await refreshTask(state, task, refreshOptions);
+    await refreshRole(state, state.judge, roleDir(pathForRun(runId), 'judge'), refreshOptions);
     await recoverCompletedJudge(state);
-    aggregateRunTmuxMetadata(state);
+    await aggregateRunTmuxMetadata(state, refreshOptions);
     recomputeRunStatus(state);
     await scheduleMoreWorkers(state);
     recomputeRunStatus(state);
@@ -945,47 +1003,46 @@ async function recoverCompletedJudge(state) {
   state.status = state.judge.status === 'completed' ? 'judged' : 'judge_failed';
 }
 
-async function refreshRole(state, roleState, dir) {
+async function refreshRole(state, roleState, dir, options = {}) {
   if (!roleState) return;
   const exitPath = path.join(dir, 'exit_code');
   const exit = await readTextMaybe(exitPath, 1000);
   const exitInfo = await fileInfo(exitPath);
   const key = roleState === state.judge ? 'judge' : 'planner';
+  roleState.files = await standardFiles(dir);
+  await attachTmuxMetadata(roleState, dir);
   if (exit !== '') {
     roleState.exitCode = Number(exit.trim());
     if (!roleState.endedAt && exitInfo.exists) roleState.endedAt = exitInfo.mtime;
     clearMissingRunner(roleState);
     if (['running', 'unknown'].includes(roleState.status)) roleState.status = roleState.exitCode === 0 ? 'completed' : 'failed';
   }
-  else if (['running', 'unknown'].includes(roleState.status) && hasLiveRunnerProcess(state, key, roleState)) {
+  else if (['running', 'unknown'].includes(roleState.status) && await hasLiveRunnerProcess(state, key, roleState, options)) {
     roleState.status = 'running';
     clearMissingRunner(roleState);
-  }
-  else if (roleState.status === 'running' && !hasLiveRunnerProcess(state, key, roleState)) {
+  } else if (roleState.status === 'running' && !await hasLiveRunnerProcess(state, key, roleState, options)) {
     if (shouldMarkRunnerUnknown(roleState)) roleState.status = 'unknown';
   } else if (roleState.status === 'running') clearMissingRunner(roleState);
-  roleState.files = await standardFiles(dir);
-  await attachTmuxMetadata(roleState, dir);
 }
 
-async function refreshTask(state, task) {
+async function refreshTask(state, task, options = {}) {
   const dir = roleDir(pathForRun(state.runId), 'worker', task.id);
   const exitPath = path.join(dir, 'exit_code');
   const exit = await readTextMaybe(exitPath, 1000);
   const exitInfo = await fileInfo(exitPath);
+  task.files = await standardFiles(dir);
+  await attachTmuxMetadata(task, dir);
   if (exit !== '') {
     task.exitCode = Number(exit.trim());
     if (!task.endedAt && exitInfo.exists) task.endedAt = exitInfo.mtime;
     clearMissingRunner(task);
     if (['pending', 'running', 'unknown'].includes(task.status)) task.status = task.exitCode === 0 ? 'completed' : 'failed';
-  } else if (['running', 'unknown'].includes(task.status) && hasLiveRunnerProcess(state, task.id, task)) {
+  } else if (['running', 'unknown'].includes(task.status) && await hasLiveRunnerProcess(state, task.id, task, options)) {
     task.status = 'running';
     clearMissingRunner(task);
-  } else if (task.status === 'running' && !hasLiveRunnerProcess(state, task.id, task)) {
+  } else if (task.status === 'running' && !await hasLiveRunnerProcess(state, task.id, task, options)) {
     if (shouldMarkRunnerUnknown(task)) task.status = 'unknown';
   } else if (task.status === 'running') clearMissingRunner(task);
-  task.files = await standardFiles(dir);
-  await attachTmuxMetadata(task, dir);
   delete task.attentionHint;
   task.artifacts = [];
   for (const rel of task.expectedArtifacts || []) task.artifacts.push({ path: rel, ...(await fileInfo(path.isAbsolute(rel) ? rel : path.join(workspacePathOf(state), rel))) });
@@ -1032,12 +1089,12 @@ async function attachTmuxMetadata(target, dir) {
   };
 }
 
-function aggregateRunTmuxMetadata(state) {
+async function aggregateRunTmuxMetadata(state, options = {}) {
   const roles = [state.planner, ...(state.tasks || []), state.judge].filter(Boolean);
   const entries = roles.map(role => role.tmux).filter(tmux => tmux?.runner === 'tmux');
   const readyEntries = entries.filter(tmux => tmux.ready === true);
   if (!entries.length) {
-    if ((state.runner || RUNNER) === 'tmux') {
+    if ((state.runner || LEGACY_DEFAULT_RUNNER) === 'tmux') {
       state.tmux = {
         runner: 'tmux',
         hasTmuxSession: false
@@ -1047,6 +1104,7 @@ function aggregateRunTmuxMetadata(state) {
     }
     return;
   }
+  state.runner = 'tmux';
   const withSession = readyEntries.find(tmux => tmux.sessionName || tmux.target || tmux.windowName);
   if (!withSession) {
     state.tmux = {
@@ -1055,12 +1113,13 @@ function aggregateRunTmuxMetadata(state) {
     };
     return;
   }
+  const hasTmuxSession = await hasDurableTmuxSession(state, { tmux: withSession }, options);
   state.tmux = {
     runner: 'tmux',
-    hasTmuxSession: true,
+    hasTmuxSession,
     tmuxSessionName: withSession.sessionName || ''
   };
-  if (withSession.attachCommand) state.tmux.tmuxAttachCommand = withSession.attachCommand;
+  if (hasTmuxSession && withSession.attachCommand) state.tmux.tmuxAttachCommand = withSession.attachCommand;
 }
 
 async function standardFiles(dir) {
@@ -1105,7 +1164,7 @@ async function retryTasksInState(state, taskIds = null, { auto = false, maxRetri
   });
   if (!tasksToRetry.length) return { retried: [], state };
   for (const task of tasksToRetry) {
-    if (hasLiveRunnerProcess(state, task.id, task)) throw new Error(`task still has a live process: ${task.id}`);
+    if (await hasLiveRunnerProcess(state, task.id, task)) throw new Error(`task still has a live process: ${task.id}`);
   }
   for (const task of tasksToRetry) {
     const batch = (state.batches || []).find(item => item.id === task.batchId);
@@ -1220,7 +1279,7 @@ async function buildJudgeInput(state) {
       workspaceName: state.workspaceName || path.basename(workspacePathOf(state)) || workspacePathOf(state),
       git: state.git || state.workspace?.git || null,
       status: state.status,
-      runner: state.runner || RUNNER,
+      runner: state.runner || LEGACY_DEFAULT_RUNNER,
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       maxParallel: state.maxParallel,
@@ -1288,7 +1347,7 @@ export function summaryOfRun(s) {
   const tasks = s.tasks || [];
   const workspacePath = s.workspacePath || s.repo || '';
   const git = s.git || s.workspace?.git || null;
-  return { runId: s.runId, label: s.label, repo: s.repo || workspacePath, workspacePath, workspaceName: s.workspaceName || path.basename(workspacePath || ''), git, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', gates: s.gates || {}, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
+  return { runId: s.runId, label: s.label, repo: s.repo || workspacePath, workspacePath, workspaceName: s.workspaceName || path.basename(workspacePath || ''), git, status: s.status, runner: s.runner || LEGACY_DEFAULT_RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', gates: s.gates || {}, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
 }
 
 export async function readRunTaskText(runId) {

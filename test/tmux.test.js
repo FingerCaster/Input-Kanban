@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   TmuxUnavailableError,
+  checkTmuxAvailable,
   ensureTmuxAvailable,
   sanitizeTmuxName,
   sanitizeTmuxSessionName,
@@ -49,6 +50,16 @@ test('ensureTmuxAvailable returns a clear error when tmux cannot run', async () 
       /tmux is unavailable/.test(error.message) &&
       /missing-tmux -V/.test(error.message)
   );
+});
+
+test('checkTmuxAvailable rejects non-tmux binaries that return success', async () => {
+  const { runner } = makeRunner(() => ({ code: 0, stdout: 'PowerShell 7.6.1\n' }));
+
+  const status = await checkTmuxAvailable({ tmuxBin: 'pwsh', runner });
+
+  assert.equal(status.available, false);
+  assert.equal(status.version, '');
+  assert.match(status.result.stdout, /PowerShell/);
 });
 
 test('tmuxHasSession checks availability before checking the session', async () => {
