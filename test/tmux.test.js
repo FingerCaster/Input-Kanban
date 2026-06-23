@@ -178,7 +178,8 @@ test('tmux runner writes run script, metadata, and observes exit_code', async ()
 
   const script = await fsp.readFile(path.join(outDir, 'run.sh'), 'utf8');
   assert.match(script, /CODEX_LAUNCHER=\('\/usr\/local\/bin\/codex'\)/);
-  assert.match(script, /"\$\{CODEX_LAUNCHER\[@\]\}" exec --json --sandbox/);
+  assert.match(script, /SKIP_GIT_REPO_CHECK=''/);
+  assert.match(script, /"\$\{CODEX_LAUNCHER\[@\]\}" exec \$\{SKIP_GIT_REPO_CHECK:\+"\$SKIP_GIT_REPO_CHECK"\} --json --sandbox/);
   assert.doesNotMatch(script, /CODEX_BIN=/);
   assert.match(script, /touch "\$EVENTS" "\$TIMED_EVENTS" "\$STDERR_LOG"/);
   assert.match(script, /FORMATTER_BIN='/);
@@ -269,7 +270,7 @@ test('tmux run script quotes codex launcher arrays with spaces and shell charact
     assert.match(script, /CODEX_LAUNCHER=\('/);
     assert.match(script, /codex user'\\''s stub\.js/);
   }
-  assert.match(script, /"\$\{CODEX_LAUNCHER\[@\]\}" exec --json --sandbox/);
+  assert.match(script, /"\$\{CODEX_LAUNCHER\[@\]\}" exec \$\{SKIP_GIT_REPO_CHECK:\+"\$SKIP_GIT_REPO_CHECK"\} --json --sandbox/);
 
   const exitCode = await new Promise(resolve => {
     handle.onExit(resolve);
@@ -351,6 +352,68 @@ test('tmux run script keep-open summary is generated for worker and judge roles'
     });
     assert.equal(exitCode, 0);
   }
+});
+
+test('tmux runner can include Codex git repo check bypass in run script', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-tmux-skip-git-'));
+  const outDir = path.join(tmp, 'planner');
+  const { runner: commandRunner } = makeRunner((_command, args) => {
+    if (args[0] === '-V') return { code: 0, stdout: 'tmux 3.4\n' };
+    if (args[0] === 'has-session') return { code: 1, stderr: 'no such session' };
+    return { code: 0, stdout: '' };
+  });
+  const runner = createTmuxRunner({
+    codexBin: '/usr/local/bin/codex',
+    tmuxOptions: { runner: commandRunner },
+    pollMs: 100
+  });
+
+  const handle = await runner.startCodexTask({
+    runId: 'run_skip_git',
+    taskId: 'planner',
+    batchId: 'planner',
+    runStatePath: path.join(tmp, 'run_state.json'),
+    prompt: 'plan this',
+    sandbox: 'read-only',
+    cwd: tmp,
+    outDir,
+    skipGitRepoCheck: true
+  });
+
+  const script = await fsp.readFile(path.join(outDir, 'run.sh'), 'utf8');
+  assert.match(script, /SKIP_GIT_REPO_CHECK='--skip-git-repo-check'/);
+  assert.match(script, /exec \$\{SKIP_GIT_REPO_CHECK:\+"\$SKIP_GIT_REPO_CHECK"\} --json --sandbox/);
+
+  const exitCode = await new Promise(resolve => {
+    handle.onExit(resolve);
+    fsp.writeFile(path.join(outDir, 'exit_code'), '0');
+  });
+  assert.equal(exitCode, 0);
+});
+
+test('headless runner passes Codex git repo check bypass when requested', async () => {
+  const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-headless-skip-git-'));
+  const outDir = path.join(tmp, 'worker');
+  const argvFile = path.join(tmp, 'argv.json');
+  const codexStub = path.join(tmp, 'codex-stub.js');
+  await fsp.mkdir(outDir, { recursive: true });
+  await fsp.writeFile(codexStub, `#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));\n`);
+  await fsp.chmod(codexStub, 0o755);
+  const runner = createHeadlessRunner({ codexBin: codexStub });
+
+  const handle = runner.startCodexTask({
+    runId: 'run_headless_skip_git',
+    taskId: 'T-01',
+    prompt: 'headless prompt',
+    sandbox: 'read-only',
+    cwd: tmp,
+    outDir,
+    skipGitRepoCheck: true
+  });
+  const exitCode = await new Promise(resolve => handle.onExit(resolve));
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(JSON.parse(await fsp.readFile(argvFile, 'utf8')).slice(0, 4), ['exec', '--skip-git-repo-check', '--json', '--sandbox']);
 });
 
 test('headless runner does not generate tmux keep-open run script', async () => {

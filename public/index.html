@@ -213,6 +213,8 @@
         <option value="danger-full-access">danger-full-access（高风险，跳过沙箱限制）</option>
       </select>
       <div class="muted">仅影响 worker；任务拆分和汇总验收仍保持 read-only。若执行过程提示 Permission denied / sandbox denied，这通常不是任务本身失败，而是当前沙箱能力不足；在可信工作区可改用 danger-full-access。DNS / 网络失败则通常需要检查代理、VPN 或本地 evidence。</div>
+      <label><input id="codexSkipGitRepoCheck" type="checkbox" checked style="width:auto; margin-right:6px;" />跳过 Codex Git/信任目录检查</label>
+      <div class="muted">仅在可信 umbrella / 非 Git 工作区使用；会给 planner、worker 和 judge 的 Codex exec 传入 --skip-git-repo-check。</div>
       <label><input id="planApproval" type="checkbox" style="width:auto; margin-right:6px;" />计划生成后手动确认后执行</label>
       <div class="muted">开启后会停在“已拆分，待确认”；点击“开始执行”后继续自动执行到验收。</div>
       <label>任务说明</label><textarea id="taskText" placeholder="粘贴任务说明"></textarea>
@@ -486,7 +488,7 @@ function initializeWorkerSandboxPreference() {
 }
 async function createRun() {
   saveWorkerSandboxPreference();
-  const body = { label: label.value, workspace: repo.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, planApproval: planApproval.checked, taskText: taskText.value };
+  const body = { label: label.value, workspace: repo.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, codexSkipGitRepoCheck: codexSkipGitRepoCheck.checked, planApproval: planApproval.checked, taskText: taskText.value };
   const r = await api('/api/runs', { method: 'POST', body: JSON.stringify(body) });
   selectedRun = r.runId; selectedTask = null; selectedFileName = null;
   clearFileView();
@@ -616,6 +618,7 @@ function renderSelectedHeader() {
     metaChip('开始', formatDateTime(currentState.createdAt)),
     metaChip('用时', formatDurationMs(durationSeconds(currentState.createdAt, runDurationEnd(currentState)) * 1000))
   ];
+  if (currentState.codexSkipGitRepoCheck) chips.push(metaChip('Codex', '跳过 Git 检查', { danger: true }));
   if (currentState.git?.isGit || currentState.workspace?.git?.isGit) {
     chips.push(gitChip());
   }
@@ -996,8 +999,13 @@ function taskDurationCell(t) {
 function processExitCell(t) {
   return `${esc(t?.pid || '-')} / ${esc(t?.exitCode ?? '-')}`;
 }
+function taskAttentionHintCell(t) {
+  if (!t?.attentionHint?.message) return '';
+  const severity = t.attentionHint.severity === 'blocked' ? 'failed' : 'secondary';
+  return `<span class="pill ${severity}" title="${esc(t.attentionHint.message)}">${esc(t.attentionHint.message)}</span>`;
+}
 function taskActionInfoCell(id, t) {
-  return `<div class="row-actions">${taskActionCell(id, t)}</div>`;
+  return `<div class="row-actions">${taskAttentionHintCell(t)}${taskActionCell(id, t)}</div>`;
 }
 function taskRow(id, role, t) {
   const thread = t?.codexThread?.id || '';

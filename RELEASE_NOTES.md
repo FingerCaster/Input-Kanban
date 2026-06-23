@@ -1,5 +1,19 @@
 # Release Notes
 
+## v0.0.20
+
+### Highlights
+
+- Add an explicit Web UI checkbox, checked by default, and a CLI flag for trusted umbrella / non-Git workspaces to pass Codex `--skip-git-repo-check` through planner, worker, and judge executions.
+- Persist the bypass as run-level metadata and show it in the selected run header only when enabled.
+- Surface `worker context` unauthorized failures as explicit worker attention hints in the task table.
+- Describe the bundled `input-kanban-prepare` skill in the README files, including its role as a task handoff preparer rather than an executor.
+
+### Verification
+
+- `npm run check` passed locally.
+- Windows-native validation passed on `zhangxing_win` with `npm run check` in `C:\Users\zhangxing\AppData\Local\Temp\input-kanban-v0020-rc`.
+
 ## v0.0.19
 
 ### Highlights

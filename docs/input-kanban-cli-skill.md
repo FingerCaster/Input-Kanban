@@ -40,7 +40,10 @@ Recommended forms:
 input-kanban submit --task "..."
 input-kanban submit --task-file task.md
 input-kanban submit --task-file task.md --plan-approval
+input-kanban submit --task-file task.md --codex-skip-git-repo-check
 ```
+
+Use `--codex-skip-git-repo-check` only for trusted umbrella / non-Git workspaces where Codex would otherwise refuse to run. It is off by default.
 
 ## When to Use `retry`
 

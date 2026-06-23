@@ -241,7 +241,7 @@ function approvePlanGate(state, approvedBy = 'local-user') {
   return true;
 }
 
-export async function createRun({ label = '', taskText = '', workspace = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write', planApproval = false, requiresPlanApproval = false } = {}) {
+export async function createRun({ label = '', taskText = '', workspace = '', repo = DEFAULT_REPO, maxParallel = 3, workerSandbox = 'workspace-write', planApproval = false, requiresPlanApproval = false, codexSkipGitRepoCheck = false } = {}) {
   const resolvedWorkspace = await assertWorkspacePath(workspace || repo || DEFAULT_WORKSPACE);
   const workspaceMeta = await detectWorkspaceMetadata(resolvedWorkspace);
   const runLabel = deriveRunLabel(label, taskText);
@@ -263,6 +263,7 @@ export async function createRun({ label = '', taskText = '', workspace = '', rep
     repo: resolvedWorkspace,
     maxParallel: Number(maxParallel) || 3,
     workerSandbox: normalizeSandbox(workerSandbox),
+    codexSkipGitRepoCheck: !!codexSkipGitRepoCheck,
     gates: { planApproval: normalizePlanApprovalGate(planApproval || requiresPlanApproval) },
     runner: RUNNER,
     status: 'created', createdAt: nowIso(), updatedAt: nowIso(),
@@ -434,7 +435,7 @@ export async function startPlanner(runId) {
     await fsp.rm(planPath(runDir), { force: true });
     const taskText = await fsp.readFile(path.join(runDir, 'task.md'), 'utf8');
     const prompt = defaultPlannerPrompt(state, taskText);
-    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
+    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'planner', batchId: 'planner', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir, skipGitRepoCheck: !!state.codexSkipGitRepoCheck });
     state.status = 'planning';
     state.planner = { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir, attempt: (state.plannerAttempts?.length || 0) + 1 };
     await saveRun(state);
@@ -666,7 +667,7 @@ ORCHESTRATOR_BATCH_ID: ${task.batchId || 'batch-1'}
 
 ${task.prompt}${workerArtifactInstructions(state, task)}${upstreamArtifactInstructions(state, task)}
 `;
-  const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, batchId: task.batchId || 'batch-1', runStatePath: statePath(runDir), prompt: fullPrompt, sandbox: task.sandbox || state.workerSandbox || 'workspace-write', cwd: workspacePathOf(state), outDir });
+  const child = await runner.startCodexTask({ runId: state.runId, taskId: task.id, batchId: task.batchId || 'batch-1', runStatePath: statePath(runDir), prompt: fullPrompt, sandbox: task.sandbox || state.workerSandbox || 'workspace-write', cwd: workspacePathOf(state), outDir, skipGitRepoCheck: !!state.codexSkipGitRepoCheck });
   Object.assign(task, { status: 'running', pid: child.pid, startedAt: nowIso(), dir: outDir });
 }
 
@@ -831,7 +832,7 @@ export async function startJudge(runId) {
     const judgeInput = await buildJudgeInput(state);
     await writeJsonAtomic(judgeInputPath, judgeInput);
     const prompt = defaultJudgePrompt(state, judgeInputPath);
-    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir });
+    const child = await runner.startCodexTask({ runId: state.runId, taskId: 'judge', batchId: 'judge', runStatePath: statePath(runDir), prompt, sandbox: 'read-only', cwd: workspacePathOf(state), outDir, skipGitRepoCheck: !!state.codexSkipGitRepoCheck });
     const previousJudgeAttempts = [
       ...(state.judgeAttempts || []).map(item => Number(item.attempt || 0)),
       Number(state.judge?.attempt || 0)
@@ -968,6 +969,26 @@ async function refreshRole(state, roleState, dir) {
   await attachTmuxMetadata(roleState, dir);
 }
 
+function detectWorkerAttentionHint(text) {
+  const content = String(text || '');
+  if (!content.trim()) return null;
+  const workerContextUnauthorized = /worker\s+context[\s\S]{0,160}(unauthorized|not\s+authorized|unauthorised|未授权|无授权)|(?:unauthorized|not\s+authorized|unauthorised|未授权|无授权)[\s\S]{0,160}worker\s+context/i;
+  if (workerContextUnauthorized.test(content)) {
+    return {
+      kind: 'worker_context_unauthorized',
+      severity: 'blocked',
+      message: 'Worker context 无授权，请检查 Codex/Agent 上下文授权或重新登录后重试。'
+    };
+  }
+  return null;
+}
+
+async function taskAttentionHint(dir) {
+  const stderr = await readTextMaybe(path.join(dir, 'stderr.log'), 20000);
+  const lastMessage = await readTextMaybe(path.join(dir, 'last_message.md'), 20000);
+  return detectWorkerAttentionHint(`${stderr}\n${lastMessage}`);
+}
+
 async function refreshTask(state, task) {
   const dir = roleDir(pathForRun(state.runId), 'worker', task.id);
   const exitPath = path.join(dir, 'exit_code');
@@ -986,7 +1007,9 @@ async function refreshTask(state, task) {
   } else if (task.status === 'running') clearMissingRunner(task);
   task.files = await standardFiles(dir);
   await attachTmuxMetadata(task, dir);
-  delete task.attentionHint;
+  const attentionHint = await taskAttentionHint(dir);
+  if (attentionHint) task.attentionHint = attentionHint;
+  else delete task.attentionHint;
   task.artifacts = [];
   for (const rel of task.expectedArtifacts || []) task.artifacts.push({ path: rel, ...(await fileInfo(path.isAbsolute(rel) ? rel : path.join(workspacePathOf(state), rel))) });
   const batch = (state.batches || []).find(b => b.id === task.batchId);
@@ -1224,7 +1247,8 @@ async function buildJudgeInput(state) {
       createdAt: state.createdAt,
       updatedAt: state.updatedAt,
       maxParallel: state.maxParallel,
-      workerSandbox: state.workerSandbox || 'workspace-write'
+      workerSandbox: state.workerSandbox || 'workspace-write',
+      codexSkipGitRepoCheck: !!state.codexSkipGitRepoCheck
     },
     taskText,
     plan,
@@ -1288,7 +1312,7 @@ export function summaryOfRun(s) {
   const tasks = s.tasks || [];
   const workspacePath = s.workspacePath || s.repo || '';
   const git = s.git || s.workspace?.git || null;
-  return { runId: s.runId, label: s.label, repo: s.repo || workspacePath, workspacePath, workspaceName: s.workspaceName || path.basename(workspacePath || ''), git, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', gates: s.gates || {}, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
+  return { runId: s.runId, label: s.label, repo: s.repo || workspacePath, workspacePath, workspaceName: s.workspaceName || path.basename(workspacePath || ''), git, status: s.status, runner: s.runner || RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', codexSkipGitRepoCheck: !!s.codexSkipGitRepoCheck, gates: s.gates || {}, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
 }
 
 export async function readRunTaskText(runId) {

@@ -49,10 +49,11 @@ input-kanban --workspace /path/to/your/workspace
 
 1. 点击 `新建任务批次`
 2. 填好工作区、Worker 沙箱和任务说明
-3. 点击 `创建批次`
-4. 看板会自动发起 `拆分任务`
-5. 拆分完成后自动派发 worker
-6. 所有批次完成后自动发起最终验收
+3. `跳过 Codex Git/信任目录检查` 默认勾选；如果不是可信 umbrella / 非 Git 根目录，可取消勾选
+4. 点击 `创建批次`
+5. 看板会自动发起 `拆分任务`
+6. 拆分完成后自动派发 worker
+7. 所有批次完成后自动发起最终验收
 
 ### 2) 从终端直接提交一个任务
 
@@ -64,6 +65,12 @@ input-kanban submit --task "修复登录问题，并补充回归测试" --label 
 
 ```bash
 input-kanban submit --task-file task.md
+```
+
+如果目标是可信的 umbrella / 非 Git 工作区，可显式传给 Codex：
+
+```bash
+input-kanban submit --task-file task.md --codex-skip-git-repo-check
 ```
 
 ### 3) 先看计划，再决定是否执行
@@ -112,6 +119,8 @@ input-kanban --help
 ```bash
 input-kanban install-skill codex
 ```
+
+这个 skill 专门用于把外部 Agent 对话整理成可执行的 `task.md` 交给看板：它会帮你补齐 `Goal`、`Acceptance Criteria`、`Expected Artifacts`、`Context References`、`Risks`，并在需要时建议批次和并行度。它不负责执行任务，也不负责最终验收。
 
 如需指定 Codex skills 根目录：
 

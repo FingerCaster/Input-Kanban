@@ -198,7 +198,7 @@ function parseSubmitArgs(argv) {
   const args = {
     host: '127.0.0.1', port: 8787, workspace: undefined, repo: undefined, runsDir: undefined, codexBin: undefined,
     runner: undefined, label: undefined, taskText: undefined, taskFile: undefined, maxParallel: 3,
-    workerSandbox: 'workspace-write', planApproval: false, auto: true, detach: false, watch: true, json: false, pollMs: 3000, maxRetries: 1, help: false
+    workerSandbox: 'workspace-write', codexSkipGitRepoCheck: false, planApproval: false, auto: true, detach: false, watch: true, json: false, pollMs: 3000, maxRetries: 1, help: false
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -217,6 +217,7 @@ function parseSubmitArgs(argv) {
     else if (arg === '--task-file') args.taskFile = next();
     else if (arg === '--max-parallel') args.maxParallel = Number(next());
     else if (arg === '--worker-sandbox') args.workerSandbox = validateSandbox(next(), '--worker-sandbox');
+    else if (arg === '--codex-skip-git-repo-check') args.codexSkipGitRepoCheck = true;
     else if (arg === '--plan-approval') args.planApproval = true;
     else if (arg === '--auto') { args.auto = true; args.watch = true; }
     else if (arg === '--no-auto') { args.auto = false; args.watch = false; }
@@ -331,6 +332,8 @@ Submit options:
   --task-file <path>         Read task description from file, use - for stdin
   --max-parallel <n>         Default max parallel workers, default 3
   --worker-sandbox <mode>    read-only, workspace-write, or danger-full-access
+  --codex-skip-git-repo-check
+                               Pass --skip-git-repo-check to Codex exec for umbrella/non-Git workspaces
   --plan-approval            Pause after planning until the generated plan is confirmed
   --runner <mode>            Runner mode: headless or tmux
   --runs-dir <path>          Runtime runs directory shared with the Web UI
@@ -360,6 +363,8 @@ Options:
   --task-file <path>         Read task description from file, use - for stdin
   --max-parallel <n>         Default max parallel workers, default 3
   --worker-sandbox <mode>    read-only, workspace-write, or danger-full-access
+  --codex-skip-git-repo-check
+                               Pass --skip-git-repo-check to Codex exec for umbrella/non-Git workspaces
   --plan-approval            Pause after planning until the generated plan is confirmed
   --runner <mode>            Runner mode: headless or tmux
   --runs-dir <path>          Runtime runs directory shared with the Web UI
@@ -490,6 +495,7 @@ function printAgentGuide(json = false) {
     'Treat `submit` as a new task identity.',
     'Treat `retry` as a new attempt for the same task.',
     'If the task came from an external chat, prepare a structured `task.md` first.',
+    'Use `--codex-skip-git-repo-check` only for trusted umbrella / non-Git workspaces.',
     'Use `status` before any state-dependent action.',
     'Use `result` for the final outcome.',
     'Use `stop` only with a known `runId`.'
@@ -498,6 +504,7 @@ function printAgentGuide(json = false) {
     'input-kanban submit --task "Implement the new gate workflow" --label "gate-workflow"',
     'input-kanban submit --task-file task.md',
     'input-kanban submit --task-file task.md --plan-approval',
+    'input-kanban submit --task-file task.md --codex-skip-git-repo-check',
     'input-kanban submit --task-file task.md --detach',
     'input-kanban status run_1234567890',
     'input-kanban status run_1234567890 --watch',
@@ -916,6 +923,7 @@ async function submit(args) {
     repo: process.env.KANBAN_DEFAULT_REPO,
     maxParallel: args.maxParallel,
     workerSandbox: args.workerSandbox,
+    codexSkipGitRepoCheck: args.codexSkipGitRepoCheck,
     planApproval: args.planApproval
   });
   if (!args.json) {

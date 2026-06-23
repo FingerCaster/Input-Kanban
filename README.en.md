@@ -51,10 +51,11 @@ input-kanban --workspace /path/to/your/workspace
 
 1. Click `New Run`
 2. Enter the workspace, worker sandbox, and task description
-3. Click `Create Run`
-4. The dashboard automatically starts planning
-5. After planning, it dispatches workers
-6. After all batches finish, it starts the final judge
+3. `Skip Codex Git/trust directory check` is enabled by default; disable it when the workspace is not a trusted umbrella / non-Git root
+4. Click `Create Run`
+5. The dashboard automatically starts planning
+6. After planning, it dispatches workers
+7. After all batches finish, it starts the final judge
 
 ### 2) Submit a task from the terminal
 
@@ -66,6 +67,12 @@ To load task text from a file:
 
 ```bash
 input-kanban submit --task-file task.md
+```
+
+For a trusted umbrella / non-Git workspace, explicitly pass the Codex bypass:
+
+```bash
+input-kanban submit --task-file task.md --codex-skip-git-repo-check
 ```
 
 ### 3) Pause after planning for approval
@@ -114,6 +121,8 @@ To install the bundled `input-kanban-prepare` skill for Codex:
 ```bash
 input-kanban install-skill codex
 ```
+
+This skill is for turning an external Agent conversation into an execution-ready `task.md` for Input Kanban: it helps fill in `Goal`, `Acceptance Criteria`, `Expected Artifacts`, `Context References`, and `Risks`, and can suggest batches or parallelism when needed. It does not execute the task or decide final acceptance.
 
 To specify the Codex skills root explicitly:
 

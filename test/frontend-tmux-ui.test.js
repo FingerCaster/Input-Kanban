@@ -120,6 +120,7 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /codex\.versionText \|\| codex\.installedVersion \|\| 'codex'/);
   assert.doesNotMatch(script, /后端命令 <code>/);
   assert.match(html, /<select id="workerSandbox">/);
+  assert.match(html, /id="codexSkipGitRepoCheck" type="checkbox" checked/);
   assert.match(html, /id="planApproval" type="checkbox"/);
   assert.doesNotMatch(html, /sessionManagementSourceFilter/);
   assert.match(html, /本机 Codex 进程/);
@@ -130,6 +131,8 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.doesNotMatch(html, /查看本机可见的 Codex 会话。/);
   assert.doesNotMatch(html, /onclick="refreshSessionManagement\(\)">刷新/);
   assert.match(script, /api\('\/api\/session-management\/processes'\)/);
+  assert.match(html, /跳过 Codex Git\/信任目录检查/);
+  assert.match(html, /--skip-git-repo-check/);
   assert.match(html, /计划生成后手动确认后执行/);
   assert.match(html, /停在“已拆分，待确认”/);
   assert.match(html, /创建/);
@@ -138,6 +141,7 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(html, /这通常不是任务本身失败，而是当前沙箱能力不足/);
   assert.match(html, /DNS \/ 网络失败则通常需要检查代理、VPN 或本地 evidence/);
   assert.match(script, /workerSandbox: workerSandbox\.value/);
+  assert.match(script, /codexSkipGitRepoCheck: codexSkipGitRepoCheck\.checked/);
   assert.match(script, /planApproval: planApproval\.checked/);
   assert.match(script, /function planApprovalPending\(state = currentState\)/);
   assert.match(script, /function runStatusLabel\(state = currentState\)/);
@@ -145,6 +149,7 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /开始执行/);
   assert.match(script, /const WORKER_SANDBOX_STORAGE_KEY = 'input-kanban\.workerSandbox'/);
   assert.match(script, /const VALID_WORKER_SANDBOXES = new Set\(\['read-only', 'workspace-write', 'danger-full-access'\]\)/);
+  assert.match(script, /跳过 Git 检查/);
   assert.match(script, /function initializeWorkerSandboxPreference\(\)/);
   assert.match(script, /localStorage\.getItem\(WORKER_SANDBOX_STORAGE_KEY\)/);
   assert.match(script, /select\.addEventListener\('change', saveWorkerSandboxPreference\)/);
@@ -323,6 +328,8 @@ test('task table has no tmux column or file-viewer tmux panel', () => {
   assert.match(html, /th:nth-child\(6\), td:nth-child\(6\) \{ width: 116px; \}/);
   assert.match(html, /\.session-cell-wrap \{ display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; \}/);
   assert.match(script, /session-cell-wrap/);
+  assert.match(script, /function taskAttentionHintCell\(t\)/);
+  assert.match(script, /attentionHint\.message/);
 });
 
 test('file viewer renders role-specific file tabs', () => {

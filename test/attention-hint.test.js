@@ -37,6 +37,19 @@ async function writeRunState({ runId, runner = 'tmux', startedAt }) {
   return { runDir, workerDir };
 }
 
+test('worker context unauthorized logs surface an attention hint', async () => {
+  const startedAt = new Date().toISOString();
+  const { workerDir } = await writeRunState({ runId: 'run_worker_context_unauthorized', startedAt });
+  await fsp.writeFile(path.join(workerDir, 'stderr.log'), 'Worker context unauthorized: request denied.\n');
+  await fsp.writeFile(path.join(workerDir, 'exit_code'), '1');
+
+  const state = await refreshRun('run_worker_context_unauthorized');
+  assert.equal(state.tasks[0].status, 'failed');
+  assert.equal(state.tasks[0].attentionHint.kind, 'worker_context_unauthorized');
+  assert.match(state.tasks[0].attentionHint.message, /Worker context 无授权/);
+  assert.equal(state.batches[0].tasks[0].attentionHint.kind, 'worker_context_unauthorized');
+});
+
 test('tmux codex exec tasks do not show manual intervention hints for stale logs', async () => {
   const startedAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
   const { workerDir } = await writeRunState({ runId: 'run_stale_tmux_no_hint', startedAt });

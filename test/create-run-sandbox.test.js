@@ -31,6 +31,12 @@ test('createRun truncates derived labels by display width', async () => {
 test('createRun stores default worker sandbox', async () => {
   const state = await createRun({ label: 'default sandbox', repo, taskText: 'noop' });
   assert.equal(state.workerSandbox, 'workspace-write');
+  assert.equal(state.codexSkipGitRepoCheck, false);
+});
+
+test('createRun stores optional Codex git repo check bypass', async () => {
+  const state = await createRun({ label: 'codex bypass', repo, taskText: 'noop', codexSkipGitRepoCheck: true });
+  assert.equal(state.codexSkipGitRepoCheck, true);
 });
 
 test('createRun stores optional plan approval gate', async () => {

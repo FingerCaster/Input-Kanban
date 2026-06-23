@@ -41,13 +41,13 @@ function captureEventsWithTimestamps(stream, eventsFile, timedEventsFile) {
 export function createHeadlessRunner({ codexBin = CODEX_BIN } = {}) {
   const runningProcesses = new Map();
 
-  function startCodexTask({ runId, taskId, prompt, sandbox, cwd, outDir }) {
+  function startCodexTask({ runId, taskId, prompt, sandbox, cwd, outDir, skipGitRepoCheck = false }) {
     const events = path.join(outDir, 'events.jsonl');
     const timedEvents = path.join(outDir, 'events_timed.jsonl');
     const stderr = path.join(outDir, 'stderr.log');
     const last = path.join(outDir, 'last_message.md');
     fs.writeFileSync(path.join(outDir, 'prompt.md'), prompt);
-    const args = ['exec', '--json', '--sandbox', sandbox, '-C', cwd, '-o', last, prompt];
+    const args = ['exec', ...(skipGitRepoCheck ? ['--skip-git-repo-check'] : []), '--json', '--sandbox', sandbox, '-C', cwd, '-o', last, prompt];
     const { command, argsPrefix } = resolveCodexLauncher(codexBin);
     const child = spawn(command, [...argsPrefix, ...args], { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     captureEventsWithTimestamps(child.stdout, events, timedEvents);

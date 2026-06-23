@@ -60,12 +60,14 @@ function buildOverviewCommand(runStatePath) {
   return `while true; do clear; node ${quotedOverviewBin} ${quotedStatePath}; sleep 2; done`;
 }
 
-function buildRunScript({ codexCommand, codexArgsPrefix = [], formatterBin = FORMATTER_BIN, timestampBin = TIMESTAMP_BIN, sandbox, cwd, outDir, runId, taskId, role }) {
+function buildRunScript({ codexCommand, codexArgsPrefix = [], formatterBin = FORMATTER_BIN, timestampBin = TIMESTAMP_BIN, sandbox, cwd, outDir, runId, taskId, role, skipGitRepoCheck = false }) {
   const codexLauncher = bashArrayAssignment('CODEX_LAUNCHER', [codexCommand, ...codexArgsPrefix]);
+  const skipGitRepoCheckArg = skipGitRepoCheck ? "SKIP_GIT_REPO_CHECK='--skip-git-repo-check'" : "SKIP_GIT_REPO_CHECK=''";
   return `#!/usr/bin/env bash
 set -u
 
 ${codexLauncher}
+${skipGitRepoCheckArg}
 SANDBOX=${shellQuote(sandbox)}
 CWD=${shellQuote(cwd)}
 OUT_DIR=${shellQuote(outDir)}
@@ -84,7 +86,7 @@ EXIT_CODE="$OUT_DIR/exit_code"
 cd "$CWD"
 rm -f "$EXIT_CODE"
 touch "$EVENTS" "$TIMED_EVENTS" "$STDERR_LOG"
-"\${CODEX_LAUNCHER[@]}" exec --json --sandbox "$SANDBOX" -C "$CWD" -o "$LAST_MESSAGE" "$(<"$PROMPT_FILE")" > >(node "$TIMESTAMP_BIN" "$EVENTS" "$TIMED_EVENTS" | node "$FORMATTER_BIN") 2> >(tee -a "$STDERR_LOG" >&2)
+"\${CODEX_LAUNCHER[@]}" exec \${SKIP_GIT_REPO_CHECK:+"$SKIP_GIT_REPO_CHECK"} --json --sandbox "$SANDBOX" -C "$CWD" -o "$LAST_MESSAGE" "$(<"$PROMPT_FILE")" > >(node "$TIMESTAMP_BIN" "$EVENTS" "$TIMED_EVENTS" | node "$FORMATTER_BIN") 2> >(tee -a "$STDERR_LOG" >&2)
 code=$?
 printf '%s' "$code" > "$EXIT_CODE"
 printf '\\nInput Kanban tmux task completed.\\n'
@@ -106,7 +108,7 @@ export function createTmuxRunner({
 } = {}) {
   const runningWindows = new Map();
 
-  async function startCodexTask({ runId, taskId, batchId = null, runStatePath = null, prompt, sandbox, cwd, outDir }) {
+  async function startCodexTask({ runId, taskId, batchId = null, runStatePath = null, prompt, sandbox, cwd, outDir, skipGitRepoCheck = false }) {
     await ensureDir(outDir);
     const sessionName = sessionNameForRun(runId);
     const role = roleForTask(taskId);
@@ -120,7 +122,7 @@ export function createTmuxRunner({
 
     await fsp.writeFile(promptFile, prompt);
     const { command: codexCommand, argsPrefix: codexArgsPrefix } = resolveCodexLauncher(codexBin);
-    await fsp.writeFile(runScript, buildRunScript({ codexCommand, codexArgsPrefix, sandbox, cwd, outDir, runId, taskId, role }));
+    await fsp.writeFile(runScript, buildRunScript({ codexCommand, codexArgsPrefix, sandbox, cwd, outDir, runId, taskId, role, skipGitRepoCheck }));
     await fsp.chmod(runScript, 0o755);
 
     const metadata = {

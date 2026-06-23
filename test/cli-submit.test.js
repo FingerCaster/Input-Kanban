@@ -53,10 +53,11 @@ test('CLI guide prints the agent quick start and JSON form', () => {
   const parsed = JSON.parse(jsonOutput);
   assert.equal(parsed.ok, true);
   assert.equal(parsed.command, 'guide');
-  assert.equal(parsed.templates.length, 10);
+  assert.equal(parsed.templates.length, 11);
   assert.deepEqual(parsed.handoffSections, ['Goal', 'Acceptance Criteria', 'Expected Artifacts', 'Context References', 'Risks']);
   assert.equal(parsed.skillInstall, 'input-kanban install-skill codex');
   assert.match(parsed.templates[0], /input-kanban submit --task/);
+  assert.ok(parsed.templates.includes('input-kanban submit --task-file task.md --codex-skip-git-repo-check'));
 });
 
 test('CLI installs bundled prepare skill for Codex', async () => {
@@ -319,13 +320,16 @@ test('CLI exposes submit auto loop without replacing serve mode', () => {
   assert.match(cli, /input-kanban retry <runId> \[taskId\]/);
   assert.match(cli, /await retryRun\(args\.runId/);
   assert.match(cli, /input-kanban submit \[options\]/);
+  assert.match(cli, /--codex-skip-git-repo-check\s+Pass --skip-git-repo-check to Codex exec/);
   assert.match(cli, /--plan-approval\s+Pause after planning until the generated plan is confirmed/);
   assert.match(cli, /--auto\s+Plan, dispatch all batches, judge, and watch, default for submit/);
   assert.match(cli, /--no-auto\s+Only create the run and start planning/);
   assert.match(cli, /Task batch name, default generated from task text/);
   assert.match(cli, /-d, --detach\s+Run the default auto loop in a background supervisor/);
-  assert.match(cli, /planApproval: false, auto: true, detach: false, watch: true/);
+  assert.match(cli, /codexSkipGitRepoCheck: false, planApproval: false, auto: true, detach: false, watch: true/);
+  assert.match(cli, /arg === '--codex-skip-git-repo-check'/);
   assert.match(cli, /arg === '--plan-approval'/);
+  assert.match(cli, /codexSkipGitRepoCheck: args\.codexSkipGitRepoCheck/);
   assert.match(cli, /planApproval: args\.planApproval/);
   assert.match(cli, /async function autoRun\(args\)/);
   assert.match(cli, /function startDetachedAuto\(runId, args\)/);
