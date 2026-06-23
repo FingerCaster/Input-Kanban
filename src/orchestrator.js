@@ -343,11 +343,11 @@ function runMatchesWorkspace(run, workspaceFilter) {
 }
 
 export function isTerminalRunStatus(status) {
-  return ['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(status);
+  return ['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped', 'load_failed'].includes(status);
 }
 
 export function isFailureRunStatus(status) {
-  return ['judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped'].includes(status);
+  return ['judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped', 'load_failed'].includes(status);
 }
 
 export async function listRuns({ includeArchived = false, workspace = '' } = {}) {
@@ -355,9 +355,17 @@ export async function listRuns({ includeArchived = false, workspace = '' } = {})
   const dirs = await listRunDirs();
   const rows = [];
   for (const dir of dirs) {
-    const s = await loadRun(path.basename(dir));
-    if (!s || (!includeArchived && s.archived)) continue;
-    const summary = summaryOfRun(s);
+    const runId = path.basename(dir);
+    let summary;
+    try {
+      const s = await loadRun(runId);
+      if (!s || (!includeArchived && s.archived)) continue;
+      summary = summaryOfRun(s);
+    } catch (error) {
+      const raw = await readJson(statePath(dir), null);
+      if (!includeArchived && raw?.archived) continue;
+      summary = summaryOfLoadFailedRun(runId, error, raw);
+    }
     if (!runMatchesWorkspace(summary, workspaceFilter)) continue;
     rows.push(summary);
   }
@@ -1360,6 +1368,13 @@ export function summaryOfRun(s) {
   const workspacePath = s.workspacePath || s.repo || '';
   const git = s.git || s.workspace?.git || null;
   return { runId: s.runId, label: s.label, repo: s.repo || workspacePath, workspacePath, workspaceName: s.workspaceName || path.basename(workspacePath || ''), git, status: s.status, runner: s.runner || LEGACY_DEFAULT_RUNNER, workerSandbox: s.workerSandbox || 'workspace-write', gates: s.gates || {}, archived: !!s.archived, createdAt: s.createdAt, updatedAt: s.updatedAt, durationEnd: runDurationEndOfState(s), total: tasks.length, completed: tasks.filter(t => t.status === 'completed').length, failed: tasks.filter(t => ['failed','unknown'].includes(t.status)).length, running: tasks.filter(t => t.status === 'running').length, batches: (s.batches || []).map(b => ({ id: b.id, name: b.name, status: b.status, total: b.tasks?.length || 0, completed: (b.tasks || []).filter(t => t.status === 'completed').length })) };
+}
+
+export function summaryOfLoadFailedRun(runId, error, raw = {}) {
+  const workspacePath = raw?.workspacePath || raw?.repo || '';
+  const git = raw?.git || raw?.workspace?.git || null;
+  const updatedAt = raw?.updatedAt || raw?.createdAt || null;
+  return { runId, label: raw?.label || runId, repo: raw?.repo || workspacePath, workspacePath, workspaceName: raw?.workspaceName || path.basename(workspacePath || ''), git, status: 'load_failed', runner: raw?.runner || 'unknown', workerSandbox: raw?.workerSandbox || 'workspace-write', gates: raw?.gates || {}, archived: !!raw?.archived, createdAt: raw?.createdAt || updatedAt, updatedAt, durationEnd: updatedAt, total: 0, completed: 0, failed: 1, running: 0, batches: [], loadError: error?.message || String(error || 'failed to load run') };
 }
 
 export async function readRunTaskText(runId) {

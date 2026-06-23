@@ -37,10 +37,11 @@ export async function tmuxInstallPlan() {
   if (process.platform === 'win32') {
     if (await commandExists('winget')) {
       return plan('winget', ['install', '--id', 'marlocarlo.psmux', '-e'], 'winget install --id marlocarlo.psmux -e', 'winget', [
-        'Installs psmux, a Windows tmux-compatible package.'
+        'Windows will install psmux, a third-party tmux-compatible implementation, not official tmux.',
+        'You may install another tmux implementation manually; Input Kanban only requires a working tmux command.'
       ]);
     }
-    return { available: false, packageManager: '', displayCommand: '', notes: ['Install psmux manually or install winget first.'] };
+    return { available: false, packageManager: '', displayCommand: '', notes: ['Install psmux manually or install winget first.', 'You may install another tmux implementation manually; Input Kanban only requires a working tmux command.'] };
   }
 
   if (process.platform === 'darwin') {
