@@ -16,7 +16,7 @@ import { detectTmuxDependency } from './deps.js';
 import { tmuxHasSession } from './tmux.js';
 
 const execFileAsync = promisify(execFile);
-const runnerCache = new Map();
+const runnerCache = new Map(); // Bounded by normalizeRunner/VALID_RUNNERS.
 const VALID_SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 const MISSING_RUNNER_GRACE_MS = 10000;
 const MAX_DERIVED_LABEL_DISPLAY_WIDTH = 40;
@@ -212,10 +212,15 @@ async function hasDurableTmuxSession(state, target, options = {}) {
   if ((state.runner || LEGACY_DEFAULT_RUNNER) !== 'tmux' && tmux?.runner !== 'tmux') return false;
   const sessionName = tmux?.sessionName || tmux?.target?.split(':')[0] || state.tmux?.tmuxSessionName || '';
   if (!sessionName) return false;
+  const cache = options.tmuxSessionStatusCache;
+  if (cache?.has(sessionName)) return cache.get(sessionName);
   try {
     const sessionChecker = options.tmuxSessionChecker || tmuxHasSession;
-    return await sessionChecker(sessionName, {});
+    const result = await sessionChecker(sessionName, {});
+    cache?.set(sessionName, result);
+    return result;
   } catch {
+    cache?.set(sessionName, false);
     return false;
   }
 }
@@ -964,7 +969,7 @@ async function loadAndRefreshRun(runId, appClient = null, { light = false, tmuxS
   return await withRunStateLock(runId, async () => {
     const state = await loadRun(runId);
     if (!state) return null;
-    const refreshOptions = { tmuxSessionChecker };
+    const refreshOptions = { tmuxSessionChecker, tmuxSessionStatusCache: new Map() };
     state.runner = normalizeRunner(state.runner || LEGACY_DEFAULT_RUNNER, 'runner');
     await refreshRole(state, state.planner, roleDir(pathForRun(runId), 'planner'), refreshOptions);
     await recoverCompletedPlanner(state);
@@ -1016,13 +1021,16 @@ async function refreshRole(state, roleState, dir, options = {}) {
     if (!roleState.endedAt && exitInfo.exists) roleState.endedAt = exitInfo.mtime;
     clearMissingRunner(roleState);
     if (['running', 'unknown'].includes(roleState.status)) roleState.status = roleState.exitCode === 0 ? 'completed' : 'failed';
+  } else {
+    const shouldCheckLiveRunner = ['running', 'unknown'].includes(roleState.status);
+    const hasLiveRunner = shouldCheckLiveRunner ? await hasLiveRunnerProcess(state, key, roleState, options) : false;
+    if (shouldCheckLiveRunner && hasLiveRunner) {
+      roleState.status = 'running';
+      clearMissingRunner(roleState);
+    } else if (roleState.status === 'running' && shouldMarkRunnerUnknown(roleState)) {
+      roleState.status = 'unknown';
+    }
   }
-  else if (['running', 'unknown'].includes(roleState.status) && await hasLiveRunnerProcess(state, key, roleState, options)) {
-    roleState.status = 'running';
-    clearMissingRunner(roleState);
-  } else if (roleState.status === 'running' && !await hasLiveRunnerProcess(state, key, roleState, options)) {
-    if (shouldMarkRunnerUnknown(roleState)) roleState.status = 'unknown';
-  } else if (roleState.status === 'running') clearMissingRunner(roleState);
 }
 
 async function refreshTask(state, task, options = {}) {
@@ -1037,12 +1045,16 @@ async function refreshTask(state, task, options = {}) {
     if (!task.endedAt && exitInfo.exists) task.endedAt = exitInfo.mtime;
     clearMissingRunner(task);
     if (['pending', 'running', 'unknown'].includes(task.status)) task.status = task.exitCode === 0 ? 'completed' : 'failed';
-  } else if (['running', 'unknown'].includes(task.status) && await hasLiveRunnerProcess(state, task.id, task, options)) {
-    task.status = 'running';
-    clearMissingRunner(task);
-  } else if (task.status === 'running' && !await hasLiveRunnerProcess(state, task.id, task, options)) {
-    if (shouldMarkRunnerUnknown(task)) task.status = 'unknown';
-  } else if (task.status === 'running') clearMissingRunner(task);
+  } else {
+    const shouldCheckLiveRunner = ['running', 'unknown'].includes(task.status);
+    const hasLiveRunner = shouldCheckLiveRunner ? await hasLiveRunnerProcess(state, task.id, task, options) : false;
+    if (shouldCheckLiveRunner && hasLiveRunner) {
+      task.status = 'running';
+      clearMissingRunner(task);
+    } else if (task.status === 'running' && shouldMarkRunnerUnknown(task)) {
+      task.status = 'unknown';
+    }
+  }
   delete task.attentionHint;
   task.artifacts = [];
   for (const rel of task.expectedArtifacts || []) task.artifacts.push({ path: rel, ...(await fileInfo(path.isAbsolute(rel) ? rel : path.join(workspacePathOf(state), rel))) });

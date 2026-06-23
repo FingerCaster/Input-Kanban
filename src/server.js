@@ -13,6 +13,7 @@ import { startAutoScheduler } from './scheduler.js';
 
 const PUBLIC_DIR = path.join(APP_ROOT, 'public');
 const CODEX_INFO_TTL_MS = 30000;
+const SERVER_CLOSE_FORCE_AFTER_MS = Number(process.env.KANBAN_SERVER_CLOSE_FORCE_AFTER_MS || 3000);
 const execFileAsync = promisify(execFile);
 let codexInfoCache = null;
 
@@ -328,6 +329,26 @@ export function createHttpServer({ appClient = new CodexAppServerClient() } = {}
   });
 }
 
+export async function closeHttpServerGracefully(server, { forceAfterMs = SERVER_CLOSE_FORCE_AFTER_MS } = {}) {
+  let closed = false;
+  const closePromise = new Promise((resolve, reject) => {
+    server.close(error => error ? reject(error) : resolve());
+  });
+  server.closeIdleConnections?.();
+  const forceTimer = server.closeAllConnections && Number.isFinite(forceAfterMs) && forceAfterMs >= 0
+    ? setTimeout(() => {
+      if (!closed) server.closeAllConnections();
+    }, forceAfterMs)
+    : null;
+  forceTimer?.unref?.();
+  try {
+    await closePromise;
+  } finally {
+    closed = true;
+    if (forceTimer) clearTimeout(forceTimer);
+  }
+}
+
 export async function startServer({ host = process.env.HOST || '127.0.0.1', port = Number(process.env.PORT || 8787), log = true, scheduler = true } = {}) {
   const runner = await effectiveRunner().catch(() => 'unavailable');
   const appClient = new CodexAppServerClient();
@@ -339,10 +360,7 @@ export async function startServer({ host = process.env.HOST || '127.0.0.1', port
   const stop = async () => {
     autoScheduler?.stop();
     appClient.stop();
-    const closePromise = new Promise(resolve => server.close(resolve));
-    server.closeIdleConnections?.();
-    server.closeAllConnections?.();
-    await closePromise;
+    await closeHttpServerGracefully(server);
   };
   return { server, appClient, autoScheduler, host, port, url, version: PACKAGE_VERSION, defaultWorkspace: DEFAULT_WORKSPACE, defaultRepo: DEFAULT_REPO, runsDir: RUNS_DIR, runner, scheduler: !!autoScheduler, stop };
 }

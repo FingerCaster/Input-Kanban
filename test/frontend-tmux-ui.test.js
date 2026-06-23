@@ -11,20 +11,31 @@ function createFrontendHarness() {
   const elements = new Map();
   const elementForId = id => {
     if (!elements.has(id)) {
+      const classes = new Set();
       elements.set(id, {
         id,
         innerHTML: '',
         textContent: '',
         value: '',
         checked: false,
-        classList: { add() {}, remove() {}, toggle() {} },
+        classList: {
+          add(...names) { for (const name of names) classes.add(name); },
+          remove(...names) { for (const name of names) classes.delete(name); },
+          toggle(name, force) {
+            if (force === true) { classes.add(name); return true; }
+            if (force === false) { classes.delete(name); return false; }
+            if (classes.has(name)) { classes.delete(name); return false; }
+            classes.add(name); return true;
+          },
+          contains(name) { return classes.has(name); }
+        },
         setAttribute() {},
         addEventListener() {}
       });
     }
     return elements.get(id);
   };
-  const globalElementIds = ['label', 'repo', 'runsDir', 'runnerMode', 'maxParallel', 'workerSandbox', 'planApproval', 'taskText'];
+  const globalElementIds = ['label', 'repo', 'runsDir', 'runnerMode', 'maxParallel', 'workerSandbox', 'planApproval', 'taskText', 'tmuxDependencyModal', 'showTmuxInstallCommandBtn', 'copyTmuxDependencyCommandBtn'];
   const context = {
     console: { error() {} },
     localStorage: { getItem() { return ''; }, setItem() {} },
@@ -61,6 +72,7 @@ globalThis.__setRun = (runId, state) => { selectedRun = runId; currentState = st
 globalThis.__runActionState = runActionState;
 globalThis.__dispatchRun = dispatchRun;
 globalThis.__createRun = createRun;
+globalThis.__showTmuxInstallCommand = showTmuxInstallCommand;
 globalThis.__hasRunTmuxMetadata = hasRunTmuxMetadata;
 globalThis.__setApi = nextApi => { api = nextApi; };
 globalThis.__calls = calls;`, context);
@@ -148,6 +160,9 @@ test('footer exposes codex backend status and create form exposes worker sandbox
   assert.match(script, /async function ensureTmuxForCreate\(\)/);
   assert.match(script, /tmux 未安装，不能创建 tmux runner 批次。/);
   assert.match(script, /input-kanban deps install tmux/);
+  assert.match(html, /id="tmuxDependencyModal"/);
+  assert.match(html, /id="showTmuxInstallCommandBtn"/);
+  assert.match(html, /id="copyTmuxDependencyCommandBtn"/);
   assert.match(html, /id="planApproval" type="checkbox"/);
   assert.doesNotMatch(html, /sessionManagementSourceFilter/);
   assert.match(html, /本机 Codex 进程/);
@@ -230,10 +245,16 @@ test('create form blocks tmux run creation when tmux is missing', async () => {
 
   assert.deepEqual(harness.__calls.filter(call => call.kind === 'api').map(call => call.path), ['/api/tmux']);
   assert.equal(harness.__calls.some(call => call.kind === 'api' && call.path === '/api/runs'), false);
-  const confirm = harness.__calls.find(call => call.kind === 'confirm');
-  assert.match(confirm.message, /tmux 未安装，不能创建 tmux runner 批次/);
-  const prompt = harness.__calls.find(call => call.kind === 'prompt');
-  assert.equal(prompt.value, 'input-kanban deps install tmux');
+  assert.equal(harness.__calls.some(call => call.kind === 'confirm'), false);
+  assert.equal(harness.__calls.some(call => call.kind === 'prompt'), false);
+  assert.equal(harness.tmuxDependencyModal.classList.contains('hidden'), false);
+  assert.match(harness.document.getElementById('tmuxDependencyMessage').textContent, /tmux 未安装，不能创建 tmux runner 批次/);
+  assert.equal(harness.showTmuxInstallCommandBtn.classList.contains('hidden'), false);
+  assert.equal(harness.copyTmuxDependencyCommandBtn.classList.contains('hidden'), true);
+  harness.__showTmuxInstallCommand();
+  assert.equal(harness.document.getElementById('tmuxDependencyCommandWrap').classList.contains('hidden'), false);
+  assert.equal(harness.document.getElementById('tmuxDependencyCommand').textContent, 'input-kanban deps install tmux');
+  assert.equal(harness.copyTmuxDependencyCommandBtn.classList.contains('hidden'), false);
 });
 
 test('create form shows manual tmux guidance when no installer is available', async () => {
@@ -251,11 +272,12 @@ test('create form shows manual tmux guidance when no installer is available', as
   await harness.__createRun();
 
   assert.equal(harness.__calls.some(call => call.kind === 'api' && call.path === '/api/runs'), false);
-  const confirm = harness.__calls.find(call => call.kind === 'confirm');
-  assert.match(confirm.message, /安装指引/);
-  const prompt = harness.__calls.find(call => call.kind === 'prompt');
-  assert.match(prompt.title, /安装指引/);
-  assert.equal(prompt.value, 'Install psmux manually or install winget first.');
+  assert.equal(harness.__calls.some(call => call.kind === 'confirm'), false);
+  assert.equal(harness.__calls.some(call => call.kind === 'prompt'), false);
+  assert.match(harness.showTmuxInstallCommandBtn.textContent, /安装指引/);
+  assert.equal(harness.copyTmuxDependencyCommandBtn.classList.contains('hidden'), true);
+  harness.__showTmuxInstallCommand();
+  assert.equal(harness.document.getElementById('tmuxDependencyCommand').textContent, 'Install psmux manually or install winget first.');
 });
 
 test('run attach affordance requires a live tmux session flag', () => {
@@ -296,7 +318,8 @@ test('create form loads the default runner before following it', async () => {
 
   assert.deepEqual(harness.__calls.filter(call => call.kind === 'api').map(call => call.path), ['/api/config', '/api/tmux']);
   assert.equal(harness.__calls.some(call => call.kind === 'api' && call.path === '/api/runs'), false);
-  assert.match(harness.__calls.find(call => call.kind === 'confirm').message, /tmux 未安装/);
+  assert.equal(harness.__calls.some(call => call.kind === 'confirm'), false);
+  assert.match(harness.document.getElementById('tmuxDependencyMessage').textContent, /tmux 未安装/);
 });
 
 test('create form does not require config loading for explicit headless runner', async () => {

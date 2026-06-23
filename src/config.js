@@ -2,15 +2,20 @@ import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { VALID_RUNNERS, normalizeRunner } from './utils.js';
 
-export const VALID_RUNNERS = ['headless', 'tmux'];
+export { VALID_RUNNERS };
 const CONFIG_KEYS = new Set(['defaultRunner']);
 
+// Config normalization accepts a fallback for persisted/local defaults; runtime
+// runner normalization remains strict in utils.normalizeRunner.
 export function normalizeRunnerConfig(value = 'headless', source = 'runner', { fallback = null } = {}) {
-  const runner = String(value || '').trim();
-  if (VALID_RUNNERS.includes(runner)) return runner;
-  if (fallback !== null) return fallback;
-  throw new Error(`invalid ${source}: ${value}; expected one of: ${VALID_RUNNERS.join(', ')}`);
+  try {
+    return normalizeRunner(value, source);
+  } catch (error) {
+    if (fallback !== null) return fallback;
+    throw error;
+  }
 }
 
 export function configPath() {
@@ -28,7 +33,7 @@ function configReadError(file, error) {
 
 function configParseError(file, detail) {
   const wrapped = new Error(`invalid Input Kanban config at ${file}: ${detail}`);
-  wrapped.statusCode = 500;
+  wrapped.statusCode = 400;
   return wrapped;
 }
 

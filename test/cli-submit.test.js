@@ -386,7 +386,11 @@ test('tmux installer --yes reaches the installer branch', async () => {
         spawnImpl,
         log() {}
       }),
-      /tmux installation command completed, but tmux -V still failed/
+      error => {
+        assert.match(error.message, /tmux installation command completed, but tmux -V still failed/);
+        assert.match(error.message, /open a new terminal/i);
+        return true;
+      }
     );
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].args, ['tmux']);
