@@ -25,7 +25,10 @@ export const CODEX_CHECK_LATEST = process.env.KANBAN_CODEX_CHECK_LATEST === '1';
 export function normalizeRunner(value = 'headless', source = 'KANBAN_RUNNER') {
   const runner = String(value || '').trim();
   if (VALID_RUNNERS.includes(runner)) return runner;
-  throw new Error(`invalid ${source}: ${value}; expected one of: ${VALID_RUNNERS.join(', ')}`);
+  const error = new Error(`invalid ${source}: ${value}; expected one of: ${VALID_RUNNERS.join(', ')}`);
+  error.code = 'INVALID_RUNNER';
+  error.source = source;
+  throw error;
 }
 
 /**

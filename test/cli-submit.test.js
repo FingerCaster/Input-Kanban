@@ -34,6 +34,8 @@ test('CLI exposes version output', () => {
   assert.equal(versionOnly, `input-kanban v${packageJson.version}`);
   assert.match(cli, /printVersion\(\)/);
   assert.match(cli, /Input Kanban v\$\{PACKAGE_VERSION\} started/);
+  assert.match(packageJson.scripts.check, /node --check src\/config\.js/);
+  assert.match(packageJson.scripts.check, /node --check src\/deps\.js/);
 });
 
 test('CLI help exposes the agent guide entry point', () => {
@@ -140,6 +142,20 @@ test('CLI emits JSON runs output for active discovery', async () => {
     batches: [],
     judge: { status: 'pending' }
   });
+  await writeRunState(runsDir, 'run_load_failed', {
+    runId: 'run_load_failed',
+    label: 'bad state',
+    repo: repoRoot,
+    workspacePath: repoRoot,
+    runner: 'future-runner',
+    status: 'created',
+    createdAt: '2026-06-10T00:00:03.000Z',
+    updatedAt: '2026-06-10T00:00:03.000Z',
+    planner: { status: 'pending' },
+    tasks: [],
+    batches: [],
+    judge: { status: 'pending' }
+  });
   const output = runCli(['--json', 'runs', '--active', '--runs-dir', runsDir]);
   const parsed = JSON.parse(output);
   assert.equal(parsed.ok, true);
@@ -147,9 +163,13 @@ test('CLI emits JSON runs output for active discovery', async () => {
   assert.equal(parsed.active, true);
   assert.equal(parsed.count, 2);
   assert.deepEqual(parsed.runs.map(run => run.runId), ['run_blocked', 'run_active']);
+  assert.equal(parsed.runs.some(run => run.status === 'load_failed'), false);
   assert.equal(parsed.runs[0].status, 'batch_blocked');
   assert.equal(parsed.runs[1].running, 1);
   assert.equal(parsed.runs[1].workspacePath, path.resolve(repoRoot));
+
+  const textOutput = runCli(['runs', '--runs-dir', runsDir]);
+  assert.match(textOutput, /run_load_failed｜bad state｜加载失败\(load_failed\)/);
 });
 
 test('CLI can filter runs by workspace', async () => {

@@ -17,7 +17,7 @@ await fsp.mkdir(nonGitRepo, { recursive: true });
 await execFileAsync('git', ['init'], { cwd: repo });
 process.env.KANBAN_RUNS_DIR = path.join(tmp, 'runs');
 process.env.KANBAN_RUNNER = 'headless';
-const { createRun, listRuns, loadRun, markTaskCompleted, readRunFile, renameRun } = await import(`../src/orchestrator.js?create-sandbox=${Date.now()}`);
+const { autoAdvanceActiveRuns, createRun, listRuns, loadRun, markTaskCompleted, readRunFile, renameRun } = await import(`../src/orchestrator.js?create-sandbox=${Date.now()}`);
 
 test('createRun derives a label from task text when omitted', async () => {
   const state = await createRun({ repo, taskText: '请修复登录问题，并补充回归测试\n\n更多细节' });
@@ -201,6 +201,60 @@ test('listRuns surfaces a load_failed summary for a run with an invalid runner',
   assert.equal(summary.runner, 'future-runner');
   assert.equal(summary.failed, 1);
   assert.match(summary.loadError, /invalid runner: future-runner/);
+});
+
+test('autoAdvanceActiveRuns skips runs that cannot be loaded', async () => {
+  const runId = 'run_auto_advance_invalid_runner_state';
+  const runDir = path.join(process.env.KANBAN_RUNS_DIR, runId);
+  await fsp.mkdir(runDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
+    runId,
+    label: 'invalid scheduler state',
+    repo,
+    workspacePath: repo,
+    runner: 'future-runner',
+    status: 'created',
+    createdAt: '2026-06-10T08:00:00.000Z',
+    updatedAt: '2026-06-10T08:01:00.000Z',
+    planner: { status: 'pending' },
+    batches: [],
+    tasks: [],
+    judge: { status: 'pending' }
+  }, null, 2));
+
+  await assert.rejects(() => loadRun(runId), /invalid runner: future-runner/);
+  const results = await autoAdvanceActiveRuns();
+
+  assert.equal(results.some(result => result.runId === runId), false);
+  assert.equal(results.some(result => result.ok === false && /invalid runner/.test(result.error || '')), false);
+});
+
+test('autoAdvanceActiveRuns still surfaces unexpected load failures', async () => {
+  const runId = 'run_auto_advance_bad_workspace_state';
+  const runDir = path.join(process.env.KANBAN_RUNS_DIR, runId);
+  await fsp.mkdir(runDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
+    runId,
+    label: 'bad workspace state',
+    repo: 42,
+    workspacePath: 42,
+    runner: 'headless',
+    status: 'created',
+    createdAt: '2026-06-10T08:00:00.000Z',
+    updatedAt: '2026-06-10T08:01:00.000Z',
+    planner: { status: 'pending' },
+    batches: [],
+    tasks: [],
+    judge: { status: 'pending' }
+  }, null, 2));
+
+  await assert.rejects(() => loadRun(runId));
+  const results = await autoAdvanceActiveRuns();
+  const result = results.find(item => item.runId === runId);
+
+  assert.equal(result?.ok, false);
+  assert.ok(result.error);
+  assert.doesNotMatch(result.error, /invalid runner/);
 });
 
 test('markTaskCompleted stores manual success result text', async () => {
