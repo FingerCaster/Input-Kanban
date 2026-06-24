@@ -4,6 +4,18 @@
 
 - No unreleased changes yet.
 
+## v0.0.22
+
+### Highlights
+
+- Move the implementation-oriented project guide from the repository root to `docs/PROJECT_GUIDE.md` and update README/package references accordingly.
+- Record PR #4's `v0.0.19` validation branch as integrated via `v0.0.21`, preserving PR provenance without reintroducing older code over the current mainline.
+
+### Verification
+
+- `npm run check` passed locally with 125 tests.
+- PR #4 was separately validated on a temporary `v0.0.19` worktree with `npm run check` passing 119 tests.
+
 ## v0.0.21
 
 ### Highlights
