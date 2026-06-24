@@ -489,6 +489,14 @@ test('task table has no tmux column or file-viewer tmux panel', () => {
   assert.match(script, /session-cell-wrap/);
   assert.match(script, /function taskAttentionHintCell\(t\)/);
   assert.match(script, /attentionHint\.message/);
+  assert.match(script, /function attentionHintText\(t, \{ includeDetail = false \} = \{\}\)/);
+  assert.match(script, /原因：\$\{hint\.detail\}/);
+  assert.match(script, /attention-resume-label">介入/);
+  assert.match(script, /const command = `codex resume \$\{sessionId\}`/);
+  assert.doesNotMatch(script, /codex exec resume/);
+  assert.match(html, /th:nth-child\(8\), td:nth-child\(8\) \{ width: 220px; \}/);
+  assert.match(html, /\.attention-action \{ display: inline-flex;/);
+  assert.match(html, /\.attention-pill \{ max-width: 100%; white-space: normal;/);
 });
 
 test('file viewer renders role-specific file tabs', () => {

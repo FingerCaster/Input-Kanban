@@ -72,6 +72,19 @@ test('environment HTTP blockers surface a running attention hint', async () => {
   assert.match(state.tasks[0].attentionHint.message, /外部环境/);
 });
 
+test('tool argument errors include nearby log context', async () => {
+  const startedAt = new Date().toISOString();
+  const { workerDir } = await writeRunState({ runId: 'run_tool_argument_error', startedAt });
+  await fsp.writeFile(path.join(workerDir, 'stderr.log'), 'INFO start\nERROR tool failed: failed to parse function arguments: missing field `cmd` at line 1 column 42 while calling shell tool\nINFO end\n');
+
+  const state = await refreshRun('run_tool_argument_error');
+  assert.equal(state.tasks[0].status, 'running');
+  assert.equal(state.tasks[0].attentionHint.kind, 'tool_argument_error');
+  assert.match(state.tasks[0].attentionHint.message, /工具调用参数错误/);
+  assert.match(state.tasks[0].attentionHint.detail, /missing field `cmd`/);
+  assert.match(state.batches[0].tasks[0].attentionHint.detail, /shell tool/);
+});
+
 test('tmux codex exec tasks do not show manual intervention hints for stale logs', async () => {
   const startedAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
   const { workerDir } = await writeRunState({ runId: 'run_stale_tmux_no_hint', startedAt });

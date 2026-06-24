@@ -1047,6 +1047,20 @@ async function refreshRole(state, roleState, dir, options = {}) {
   }
 }
 
+function attentionHintExcerpt(content, pattern) {
+  const match = pattern.exec(content);
+  if (!match) return '';
+  const matchStart = match.index;
+  const start = Math.max(0, content.lastIndexOf('\n', Math.max(0, matchStart - 240)) + 1);
+  const nextBreak = content.indexOf('\n', matchStart + Math.max(match[0].length, 1) + 240);
+  const end = nextBreak >= 0 ? nextBreak : content.length;
+  return content
+    .slice(start, end)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 360);
+}
+
 function detectWorkerAttentionHint(text) {
   const content = String(text || '');
   if (!content.trim()) return null;
@@ -1061,35 +1075,44 @@ function detectWorkerAttentionHint(text) {
     return {
       kind: 'worker_context_unauthorized',
       severity: 'blocked',
-      message: 'Worker context 无授权，请检查 Codex/Agent 上下文授权或重新登录后重试。'
+      message: 'Worker context 无授权，请检查 Codex/Agent 上下文授权或重新登录后重试。',
+      detail: attentionHintExcerpt(content, /worker\s+context|unauthorized|not\s+authorized|unauthorised|未授权|无授权/i)
     };
   }
-  if (/apply_patch verification failed|Failed to find expected lines|patch failed|hunk failed/i.test(content)) {
+  const patchContextPattern = /apply_patch verification failed|Failed to find expected lines|patch failed|hunk failed/i;
+  if (patchContextPattern.test(content)) {
     return {
       kind: 'patch_context_drift',
       severity: 'warning',
-      message: 'Patch 上下文不匹配，可能是并发修改或代码已漂移；建议尽早进入会话调整后继续。'
+      message: 'Patch 上下文不匹配，可能是并发修改或代码已漂移；建议尽早进入会话调整后继续。',
+      detail: attentionHintExcerpt(content, patchContextPattern)
     };
   }
-  if (/failed to parse function arguments|invalid function arguments|missing field [`"']?\w+[`"']? at line/i.test(content)) {
+  const toolArgumentPattern = /failed to parse function arguments|invalid function arguments|missing field [`"']?\w+[`"']? at line/i;
+  if (toolArgumentPattern.test(content)) {
     return {
       kind: 'tool_argument_error',
       severity: 'warning',
-      message: '工具调用参数错误，建议进入会话修正上下文后继续。'
+      message: '工具调用参数错误，建议进入会话修正上下文后继续。',
+      detail: attentionHintExcerpt(content, toolArgumentPattern)
     };
   }
-  if (/sandbox denied|permission denied|operation not permitted|\bEACCES\b/i.test(content)) {
+  const permissionPattern = /sandbox denied|permission denied|operation not permitted|\bEACCES\b/i;
+  if (permissionPattern.test(content)) {
     return {
       kind: 'permission_denied',
       severity: 'blocked',
-      message: '执行遇到权限或沙箱限制，可调整权限/沙箱后重试或进入会话介入。'
+      message: '执行遇到权限或沙箱限制，可调整权限/沙箱后重试或进入会话介入。',
+      detail: attentionHintExcerpt(content, permissionPattern)
     };
   }
-  if (/\bHTTP\s*(401|403|409)\b|\b(401|403|409)\b[\s\S]{0,160}(unauthorized|forbidden|conflict|unavailable)|values profile unavailable/i.test(content)) {
+  const environmentPattern = /\bHTTP\s*(401|403|409)\b|\b(401|403|409)\b[\s\S]{0,160}(unauthorized|forbidden|conflict|unavailable)|values profile unavailable/i;
+  if (environmentPattern.test(content)) {
     return {
       kind: 'environment_blocked',
       severity: 'blocked',
-      message: '外部环境/接口返回权限或可用性阻塞，建议先处理环境后再继续。'
+      message: '外部环境/接口返回权限或可用性阻塞，建议先处理环境后再继续。',
+      detail: attentionHintExcerpt(content, environmentPattern)
     };
   }
   return null;

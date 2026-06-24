@@ -24,6 +24,18 @@ If the task came from an external Agent conversation, prepare a structured `task
 
 Use `skills/input-kanban-prepare/SKILL.md` when an Agent needs a stricter preparation workflow.
 
+Prefer timestamped task draft paths so handoffs sort chronologically and do not overwrite each other:
+
+```text
+.tmp/input-kanban/YYYYMMDD-HHmm-<short-slug>-task.md
+```
+
+Example:
+
+```text
+.tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md
+```
+
 ## When to Use `submit`
 
 Use `submit` only when a new task identity is needed.
@@ -38,8 +50,8 @@ Recommended forms:
 
 ```bash
 input-kanban submit --task "..."
-input-kanban submit --task-file task.md
-input-kanban submit --task-file task.md --plan-approval
+input-kanban submit --task-file .tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md
+input-kanban submit --task-file .tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md --plan-approval
 input-kanban submit --task-file task.md --codex-skip-git-repo-check
 ```
 

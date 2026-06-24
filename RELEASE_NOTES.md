@@ -4,6 +4,23 @@
 
 - No unreleased changes yet.
 
+## v0.0.23
+
+### Highlights
+
+- Document a timestamped draft filename convention for `input-kanban-prepare`, using `.tmp/input-kanban/YYYYMMDD-HHmm-<short-slug>-task.md` so prepared handoffs sort chronologically and avoid overwrites.
+- Update the bundled `input-kanban-prepare` skill, CLI guide output, and README handoff examples to recommend the timestamped draft path.
+- Improve runtime attention hints so tool argument errors can surface nearby log context instead of only a generic warning string.
+- Widen and reflow the task-row warning/action area so long warning text renders horizontally, and add a clearer `介入 resume` label for manual intervention.
+- Correct the copied Codex session resume command from `codex exec resume <sessionId>` to `codex resume <sessionId>`.
+
+### Verification
+
+- `node --test test/cli-submit.test.js` passed locally.
+- `node --test test/attention-hint.test.js test/frontend-tmux-ui.test.js` passed locally.
+- `npm run check` passed locally with 126 tests.
+- Windows-native validation passed on `zhangxing_win` with `npm run check` in `C:\Users\zhangxing\AppData\Local\Temp\input-kanban-v0023-rc`.
+
 ## v0.0.22
 
 ### Highlights

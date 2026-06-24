@@ -7,15 +7,32 @@ The goal is not to make Input Kanban do all planning from a vague prompt. The go
 ## Recommended Flow
 
 1. Use the external Agent conversation to clarify the goal, scope, risks, and acceptance criteria.
-2. Convert the discussion into a structured `task.md`.
-3. Submit the task with plan approval:
+2. Convert the discussion into a structured task draft.
+3. Save the draft under `.tmp/input-kanban/` with a timestamped filename: `YYYYMMDD-HHmm-<short-slug>-task.md`.
+4. Submit the task with plan approval:
 
 ```bash
-input-kanban submit --task-file task.md --plan-approval
+input-kanban submit --task-file .tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md --plan-approval
 ```
 
-4. Review the generated plan before dispatching workers.
-5. Use `status`, `result`, `retry`, and `stop` to control execution.
+5. Review the generated plan before dispatching workers.
+6. Use `status`, `result`, `retry`, and `stop` to control execution.
+
+## Recommended Task File Path
+
+Prefer timestamped local draft paths so multiple Agent-prepared handoffs are easy to sort and do not overwrite each other:
+
+```text
+.tmp/input-kanban/YYYYMMDD-HHmm-<short-slug>-task.md
+```
+
+Example:
+
+```text
+.tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md
+```
+
+Use local time for `YYYYMMDD-HHmm`. Keep `<short-slug>` lowercase, descriptive, and shell-friendly.
 
 ## Minimal `task.md` Structure
 

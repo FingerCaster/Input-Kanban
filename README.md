@@ -134,7 +134,11 @@ input-kanban install-skill codex --target-dir ~/.codex/skills
 
 ### 外部 Agent 对话交给看板执行
 
-如果任务先在 Claude、Cursor、Codex 或其它外部 Agent 对话里讨论，建议先整理成结构化 `task.md`，再交给 Input Kanban：
+如果任务先在 Claude、Cursor、Codex 或其它外部 Agent 对话里讨论，建议先整理成结构化 `task.md`，再交给 Input Kanban。建议把草稿放到 `.tmp/input-kanban/`，并用 `YYYYMMDD-HHmm-<short-slug>-task.md` 命名，方便排序和避免覆盖：
+
+```text
+.tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md
+```
 
 ```bash
 input-kanban submit --task-file task.md --plan-approval

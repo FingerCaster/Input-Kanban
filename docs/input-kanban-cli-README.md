@@ -36,6 +36,7 @@ input-kanban install-skill codex --target-dir /path/to/codex/skills
 
 - Use `submit` for a new task identity
 - Use `retry` for the same task definition with a new attempt
+- Use timestamped drafts like `.tmp/input-kanban/YYYYMMDD-HHmm-<short-slug>-task.md` for prepared handoffs
 - Use `status` before state-dependent actions
 - Use `result` for final confirmation
 - Use `stop` only with an explicit `runId`

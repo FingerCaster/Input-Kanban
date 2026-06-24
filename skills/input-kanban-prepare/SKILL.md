@@ -23,12 +23,29 @@ This skill prepares an execution-ready `task.md`. It does not execute the task a
 1. Restate the goal in one or two sentences.
 2. Identify non-goals and scope boundaries.
 3. Collect evidence and context references.
-4. Write acceptance criteria as checkable bullets.
-5. Identify expected artifacts and verification methods.
-6. Suggest batches only when order or safety matters.
-7. List risks, assumptions, and open questions.
-8. Run the quality gate.
-9. Output the final `task.md` and a recommended submit command.
+4. Choose a draft path using `.tmp/input-kanban/YYYYMMDD-HHmm-<short-slug>-task.md`.
+5. Write acceptance criteria as checkable bullets.
+6. Identify expected artifacts and verification methods.
+7. Suggest batches only when order or safety matters.
+8. List risks, assumptions, and open questions.
+9. Run the quality gate.
+10. Output the final task file path and a recommended submit command.
+
+## Recommended Task File Path
+
+Prefer writing the handoff to a timestamped local draft path:
+
+```text
+.tmp/input-kanban/YYYYMMDD-HHmm-<short-slug>-task.md
+```
+
+Example:
+
+```text
+.tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md
+```
+
+Use local time for `YYYYMMDD-HHmm`. Keep `<short-slug>` lowercase, descriptive, and shell-friendly.
 
 ## Required `task.md` Shape
 
@@ -91,7 +108,7 @@ If any item fails, do not submit. Ask for clarification or improve the handoff.
 Prefer plan approval for external handoffs:
 
 ```bash
-input-kanban submit --task-file task.md --plan-approval
+input-kanban submit --task-file .tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md --plan-approval
 ```
 
 Use `--json` when another tool needs structured output:

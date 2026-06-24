@@ -48,7 +48,7 @@
     th:nth-child(5), td:nth-child(5) { width: 96px; }
     th:nth-child(6), td:nth-child(6) { width: 116px; }
     th:nth-child(7), td:nth-child(7) { width: 66px; }
-    th:nth-child(8), td:nth-child(8) { width: 94px; }
+    th:nth-child(8), td:nth-child(8) { width: 220px; }
     th { color: #cbd5e1; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; }
     tr:hover { background: #162033; cursor: pointer; }
     .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: var(--gray); line-height: 1.3; }
@@ -120,8 +120,13 @@
     .session-cell-wrap { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
     .session-cell { min-width: 0; font-variant-numeric: tabular-nums; }
     .session-cell-wrap .copy-btn { flex: 0 0 auto; margin-left: 0; }
-    .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+    .row-actions { display: flex; align-items: center; justify-content: flex-start; gap: 6px; flex-wrap: wrap; }
     .row-actions .danger, .row-actions .secondary { margin: 0; }
+    .attention-action { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+    .attention-pill { max-width: 100%; white-space: normal; overflow-wrap: anywhere; text-align: left; }
+    .attention-detail { color: #fed7aa; font-size: 11px; max-width: 100%; overflow-wrap: anywhere; }
+    .attention-resume { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+    .attention-resume-label { color: var(--muted); font-size: 11px; font-weight: 800; }
     .status-stack { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 5px; }
     .execution-summary { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; margin: 8px 0 -2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px 10px 0 0; background: #020617; color: var(--muted); font-size: 12px; }
     .execution-summary.hidden { display: none; }
@@ -1214,6 +1219,12 @@ function initSessionManagementResize() {
     window.addEventListener('mouseup', saveSessionManagementHeight);
   }
 }
+function attentionHintText(t, { includeDetail = false } = {}) {
+  const hint = t?.attentionHint;
+  if (!hint?.message) return '';
+  const detail = includeDetail && hint.detail ? `（原因：${hint.detail}）` : '';
+  return `${hint.message}${detail}`;
+}
 function updateRunNotice() {
   const el = document.getElementById('runNotice');
   if (!el) return;
@@ -1225,7 +1236,7 @@ function updateRunNotice() {
   const attentionTasks = (currentState.tasks || []).filter(t => t.attentionHint?.message);
   if (attentionTasks.length) {
     el.classList.remove('hidden');
-    el.textContent = `执行中预警:${attentionTasks.map(t => `${t.id} ${t.attentionHint.message}`).join('；')} 可在任务行复制 Codex resume 命令介入。`;
+    el.textContent = `执行中预警:${attentionTasks.map(t => `${t.id} ${attentionHintText(t, { includeDetail: true })}`).join('；')} 可在任务行复制 Codex resume 命令介入。`;
     return;
   }
   const error = currentState.planner?.planParseError;
@@ -1297,8 +1308,10 @@ function taskAttentionHintCell(t) {
   if (!t?.attentionHint?.message) return '';
   const severity = t.attentionHint.severity === 'blocked' ? 'failed' : 'secondary';
   const sessionId = taskSessionId(t);
-  const resumeButton = sessionId ? `<button class="secondary copy-btn" title="复制 Codex resume 命令" onclick='copyResumeCommand(event, ${JSON.stringify(sessionId)})'>resume</button>` : '';
-  return `<span class="pill ${severity}" title="${esc(t.attentionHint.message)}">${esc(t.attentionHint.message)}</span>${resumeButton}`;
+  const hintTitle = attentionHintText(t, { includeDetail: true });
+  const detail = t.attentionHint.detail ? `<span class="attention-detail">原因：${esc(t.attentionHint.detail)}</span>` : '';
+  const resumeButton = sessionId ? `<span class="attention-resume"><span class="attention-resume-label">介入</span><button class="secondary copy-btn" title="复制 Codex resume 命令" onclick='copyResumeCommand(event, ${JSON.stringify(sessionId)})'>resume</button></span>` : '';
+  return `<span class="attention-action"><span class="pill ${severity} attention-pill" title="${esc(hintTitle)}">${esc(t.attentionHint.message)}</span>${detail}${resumeButton}</span>`;
 }
 function taskActionInfoCell(id, t) {
   return `<div class="row-actions">${taskAttentionHintCell(t)}${taskActionCell(id, t)}</div>`;
@@ -1597,11 +1610,12 @@ async function copySessionId(event, thread) {
 }
 async function copyResumeCommand(event, sessionId) {
   event.stopPropagation();
-  const command = `codex exec resume ${sessionId}`;
+  const command = `codex resume ${sessionId}`;
+  const originalText = event.currentTarget.textContent;
   try {
     await navigator.clipboard.writeText(command);
     event.currentTarget.textContent = '✓';
-    setTimeout(() => { event.currentTarget.textContent = 'resume'; }, 900);
+    setTimeout(() => { event.currentTarget.textContent = originalText; }, 900);
   } catch {
     prompt('复制 Codex resume 命令', command);
   }

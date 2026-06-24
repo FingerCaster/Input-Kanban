@@ -51,6 +51,7 @@ test('CLI guide prints the agent quick start and JSON form', () => {
   assert.match(guideOutput, /Input Kanban Agent Guide/);
   assert.match(guideOutput, /Quick start:/);
   assert.match(guideOutput, /Expected Artifacts/);
+  assert.match(guideOutput, /\.tmp\/input-kanban\/YYYYMMDD-HHmm-<short-slug>-task\.md/);
   assert.match(guideOutput, /input-kanban retry run_1234567890/);
 
   const jsonOutput = runCli(['--json', 'guide']);
@@ -59,6 +60,8 @@ test('CLI guide prints the agent quick start and JSON form', () => {
   assert.equal(parsed.command, 'guide');
   assert.equal(parsed.templates.length, 11);
   assert.deepEqual(parsed.handoffSections, ['Goal', 'Acceptance Criteria', 'Expected Artifacts', 'Context References', 'Risks']);
+  assert.equal(parsed.preferredTaskFilePattern, '.tmp/input-kanban/YYYYMMDD-HHmm-<short-slug>-task.md');
+  assert.equal(parsed.preferredTaskFileExample, '.tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md');
   assert.equal(parsed.skillInstall, 'input-kanban install-skill codex');
   assert.match(parsed.templates[0], /input-kanban submit --task/);
   assert.ok(parsed.templates.includes('input-kanban submit --task-file task.md --codex-skip-git-repo-check'));
@@ -79,6 +82,7 @@ test('CLI installs bundled prepare skill for Codex', async () => {
   assert.equal(installed.replaced, false);
   const skillText = await fsp.readFile(path.join(targetRoot, 'input-kanban-prepare', 'SKILL.md'), 'utf8');
   assert.match(skillText, /# input-kanban-prepare/);
+  assert.match(skillText, /\.tmp\/input-kanban\/YYYYMMDD-HHmm-<short-slug>-task\.md/);
 });
 
 test('planner prompt consumes structured handoff sections as execution contract', () => {
@@ -590,4 +594,5 @@ test('README focuses on friendly usage and structured handoff', () => {
   assert.match(readme, /Expected Artifacts/);
   assert.match(readme, /skills\/input-kanban-prepare\/SKILL\.md/);
   assert.match(readme, /docs\/input-kanban-prepare\.md/);
+  assert.match(readme, /\.tmp\/input-kanban\/20260601-1909-p0-precompute-input-copy-boundary-task\.md/);
 });

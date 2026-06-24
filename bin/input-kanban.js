@@ -537,11 +537,14 @@ Options:
 }
 
 function printAgentGuide(json = false) {
+  const preferredTaskFilePattern = '.tmp/input-kanban/YYYYMMDD-HHmm-<short-slug>-task.md';
+  const preferredTaskFileExample = '.tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md';
   const quickStart = [
     'Use `input-kanban` as the execution tool.',
     'Treat `submit` as a new task identity.',
     'Treat `retry` as a new attempt for the same task.',
-    'If the task came from an external chat, prepare a structured `task.md` first.',
+    'If the task came from an external chat, prepare a structured task draft first.',
+    `Prefer task draft paths like \`${preferredTaskFilePattern}\`.`,
     'Use `--codex-skip-git-repo-check` only for trusted umbrella / non-Git workspaces.',
     'Use `status` before any state-dependent action.',
     'Use `result` for the final outcome.',
@@ -549,8 +552,8 @@ function printAgentGuide(json = false) {
   ];
   const templates = [
     'input-kanban submit --task "Implement the new gate workflow" --label "gate-workflow"',
-    'input-kanban submit --task-file task.md',
-    'input-kanban submit --task-file task.md --plan-approval',
+    `input-kanban submit --task-file ${preferredTaskFileExample}`,
+    `input-kanban submit --task-file ${preferredTaskFileExample} --plan-approval`,
     'input-kanban submit --task-file task.md --codex-skip-git-repo-check',
     'input-kanban submit --task-file task.md --detach',
     'input-kanban status run_1234567890',
@@ -567,6 +570,8 @@ function printAgentGuide(json = false) {
       title: 'Input Kanban Agent Guide',
       quickStart,
       templates,
+      preferredTaskFilePattern,
+      preferredTaskFileExample,
       handoffSections: ['Goal', 'Acceptance Criteria', 'Expected Artifacts', 'Context References', 'Risks'],
       skillInstall: 'input-kanban install-skill codex',
       rules: [
@@ -597,6 +602,10 @@ Preparation before submit:
   - Expected Artifacts
   - Context References
   - Risks
+
+Recommended task draft path:
+  ${preferredTaskFilePattern}
+  Example: ${preferredTaskFileExample}
 
 Install bundled prepare skill:
   input-kanban install-skill codex

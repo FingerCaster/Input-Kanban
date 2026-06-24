@@ -136,7 +136,11 @@ input-kanban install-skill codex --target-dir ~/.codex/skills
 
 ### Hand Off from an External Agent Conversation
 
-If the task was first discussed in Claude, Cursor, Codex, or another external Agent conversation, prepare a structured `task.md` before handing it to Input Kanban:
+If the task was first discussed in Claude, Cursor, Codex, or another external Agent conversation, prepare a structured `task.md` before handing it to Input Kanban. Prefer saving drafts under `.tmp/input-kanban/` with a `YYYYMMDD-HHmm-<short-slug>-task.md` filename so handoffs sort chronologically and do not overwrite each other:
+
+```text
+.tmp/input-kanban/20260601-1909-p0-precompute-input-copy-boundary-task.md
+```
 
 ```bash
 input-kanban submit --task-file task.md --plan-approval
