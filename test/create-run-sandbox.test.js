@@ -10,12 +10,14 @@ const execFileAsync = promisify(execFile);
 const tmp = await fsp.mkdtemp(path.join(os.tmpdir(), 'input-kanban-create-sandbox-'));
 const repo = path.join(tmp, 'repo');
 const nonGitRepo = path.join(tmp, 'not-git');
+const tmuxInstalled = async () => ({ installed: true, available: true, version: 'tmux 3.4' });
+const tmuxMissing = async () => ({ installed: false, available: false, installAvailable: false });
 await fsp.mkdir(repo, { recursive: true });
 await fsp.mkdir(nonGitRepo, { recursive: true });
 await execFileAsync('git', ['init'], { cwd: repo });
 process.env.KANBAN_RUNS_DIR = path.join(tmp, 'runs');
 process.env.KANBAN_RUNNER = 'headless';
-const { createRun, listRuns, loadRun, markTaskCompleted, readRunFile, renameRun } = await import(`../src/orchestrator.js?create-sandbox=${Date.now()}`);
+const { autoAdvanceActiveRuns, createRun, listRuns, loadRun, markTaskCompleted, readRunFile, renameRun } = await import(`../src/orchestrator.js?create-sandbox=${Date.now()}`);
 
 test('createRun derives a label from task text when omitted', async () => {
   const state = await createRun({ repo, taskText: '请修复登录问题，并补充回归测试\n\n更多细节' });
@@ -52,6 +54,66 @@ test('createRun stores optional plan approval gate', async () => {
 test('createRun stores explicit danger-full-access worker sandbox', async () => {
   const state = await createRun({ label: 'danger sandbox', repo, taskText: 'noop', workerSandbox: 'danger-full-access' });
   assert.equal(state.workerSandbox, 'danger-full-access');
+});
+
+test('createRun stores an explicit runner for the run', async () => {
+  const previousRunner = process.env.KANBAN_RUNNER;
+  delete process.env.KANBAN_RUNNER;
+  try {
+    const state = await createRun({ label: 'tmux runner', repo, taskText: 'noop', runner: 'tmux', tmuxDependencyChecker: tmuxInstalled });
+    assert.equal(state.runner, 'tmux');
+    const persisted = await loadRun(state.runId);
+    assert.equal(persisted.runner, 'tmux');
+  } finally {
+    if (previousRunner === undefined) delete process.env.KANBAN_RUNNER;
+    else process.env.KANBAN_RUNNER = previousRunner;
+  }
+});
+
+test('createRun blocks tmux runner when tmux is unavailable', async () => {
+  const previousRunner = process.env.KANBAN_RUNNER;
+  delete process.env.KANBAN_RUNNER;
+  try {
+    await assert.rejects(
+      () => createRun({ label: 'missing tmux', repo, taskText: 'noop', runner: 'tmux', tmuxDependencyChecker: tmuxMissing }),
+      error => error.statusCode === 400 && /tmux runner requires tmux/.test(error.message) && error.tmux?.installed === false
+    );
+  } finally {
+    if (previousRunner === undefined) delete process.env.KANBAN_RUNNER;
+    else process.env.KANBAN_RUNNER = previousRunner;
+  }
+});
+
+test('createRun enforces KANBAN_RUNNER over explicit runner requests', async () => {
+  const previousRunner = process.env.KANBAN_RUNNER;
+  process.env.KANBAN_RUNNER = 'headless';
+  try {
+    await assert.rejects(
+      () => createRun({ label: 'env runner wins', repo, taskText: 'noop', runner: 'tmux', tmuxDependencyChecker: tmuxInstalled }),
+      error => error.statusCode === 400 && /KANBAN_RUNNER is set to headless/.test(error.message)
+    );
+  } finally {
+    if (previousRunner === undefined) delete process.env.KANBAN_RUNNER;
+    else process.env.KANBAN_RUNNER = previousRunner;
+  }
+});
+
+test('createRun reads the current local default runner when no runner is passed', async () => {
+  const previousRunner = process.env.KANBAN_RUNNER;
+  const previousConfigPath = process.env.KANBAN_CONFIG_PATH;
+  const configPath = path.join(tmp, 'runner-config.json');
+  delete process.env.KANBAN_RUNNER;
+  process.env.KANBAN_CONFIG_PATH = configPath;
+  await fsp.writeFile(configPath, JSON.stringify({ defaultRunner: 'tmux' }));
+  try {
+    const state = await createRun({ label: 'configured runner', repo, taskText: 'noop', tmuxDependencyChecker: tmuxInstalled });
+    assert.equal(state.runner, 'tmux');
+  } finally {
+    if (previousRunner === undefined) delete process.env.KANBAN_RUNNER;
+    else process.env.KANBAN_RUNNER = previousRunner;
+    if (previousConfigPath === undefined) delete process.env.KANBAN_CONFIG_PATH;
+    else process.env.KANBAN_CONFIG_PATH = previousConfigPath;
+  }
 });
 
 test('createRun rejects unknown worker sandbox by falling back to workspace-write', async () => {
@@ -116,6 +178,89 @@ test('listRuns freezes duration after run is judged', async () => {
   const summary = listed.find(run => run.runId === state.runId);
 
   assert.equal(summary.durationEnd, '2026-06-10T08:06:00.000Z');
+});
+
+test('listRuns surfaces a load_failed summary for a run with an invalid runner', async () => {
+  const runId = 'run_invalid_runner_state';
+  const runDir = path.join(process.env.KANBAN_RUNS_DIR, runId);
+  await fsp.mkdir(runDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
+    runId,
+    label: 'invalid runner state',
+    repo,
+    workspacePath: repo,
+    runner: 'future-runner',
+    status: 'created',
+    createdAt: '2026-06-10T08:00:00.000Z',
+    updatedAt: '2026-06-10T08:01:00.000Z',
+    planner: { status: 'pending' },
+    batches: [],
+    tasks: [],
+    judge: { status: 'pending' }
+  }, null, 2));
+
+  await assert.rejects(() => loadRun(runId), /invalid runner: future-runner/);
+  const listed = await listRuns({ includeArchived: true });
+  const summary = listed.find(run => run.runId === runId);
+
+  assert.equal(summary.status, 'load_failed');
+  assert.equal(summary.runner, 'future-runner');
+  assert.equal(summary.failed, 1);
+  assert.match(summary.loadError, /invalid runner: future-runner/);
+});
+
+test('autoAdvanceActiveRuns skips runs that cannot be loaded', async () => {
+  const runId = 'run_auto_advance_invalid_runner_state';
+  const runDir = path.join(process.env.KANBAN_RUNS_DIR, runId);
+  await fsp.mkdir(runDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
+    runId,
+    label: 'invalid scheduler state',
+    repo,
+    workspacePath: repo,
+    runner: 'future-runner',
+    status: 'created',
+    createdAt: '2026-06-10T08:00:00.000Z',
+    updatedAt: '2026-06-10T08:01:00.000Z',
+    planner: { status: 'pending' },
+    batches: [],
+    tasks: [],
+    judge: { status: 'pending' }
+  }, null, 2));
+
+  await assert.rejects(() => loadRun(runId), /invalid runner: future-runner/);
+  const results = await autoAdvanceActiveRuns();
+
+  assert.equal(results.some(result => result.runId === runId), false);
+  assert.equal(results.some(result => result.ok === false && /invalid runner/.test(result.error || '')), false);
+});
+
+test('autoAdvanceActiveRuns still surfaces unexpected load failures', async () => {
+  const runId = 'run_auto_advance_bad_workspace_state';
+  const runDir = path.join(process.env.KANBAN_RUNS_DIR, runId);
+  await fsp.mkdir(runDir, { recursive: true });
+  await fsp.writeFile(path.join(runDir, 'run_state.json'), JSON.stringify({
+    runId,
+    label: 'bad workspace state',
+    repo: 42,
+    workspacePath: 42,
+    runner: 'headless',
+    status: 'created',
+    createdAt: '2026-06-10T08:00:00.000Z',
+    updatedAt: '2026-06-10T08:01:00.000Z',
+    planner: { status: 'pending' },
+    batches: [],
+    tasks: [],
+    judge: { status: 'pending' }
+  }, null, 2));
+
+  await assert.rejects(() => loadRun(runId));
+  const results = await autoAdvanceActiveRuns();
+  const result = results.find(item => item.runId === runId);
+
+  assert.equal(result?.ok, false);
+  assert.ok(result.error);
+  assert.doesNotMatch(result.error, /invalid runner/);
 });
 
 test('markTaskCompleted stores manual success result text', async () => {

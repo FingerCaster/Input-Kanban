@@ -1,5 +1,27 @@
 # Release Notes
 
+## Unreleased
+
+- No unreleased changes yet.
+
+## v0.0.21
+
+### Highlights
+
+- Add platform-aware runner selection: runs can use `headless` or `tmux`, with Web creation controls and per-run persistence.
+- Add local default runner configuration shared by CLI and Web UI, while allowing `KANBAN_RUNNER` to override the local default.
+- Add tmux dependency detection and explicit install guidance via `input-kanban deps tmux` and `input-kanban deps install tmux`.
+- Support Windows tmux-compatible install guidance through `winget install --id marlocarlo.psmux -e`, clearly noting psmux is a third-party tmux-compatible implementation.
+- Block tmux run creation when tmux is unavailable instead of silently falling back to headless.
+- Surface `load_failed` run summaries with visible load error details when a stored run cannot be normalized.
+- Surface running worker warnings before final judge by detecting patch context drift, tool argument errors, permission/sandbox denials, and HTTP 401/403/409 environment blockers from worker logs.
+- Show run-level warning text and add a task-row `resume` copy action so users can quickly resume the Codex session for manual intervention.
+
+### Verification
+
+- `npm run check` passed locally with 125 tests.
+- Windows-native validation passed on `zhangxing_win` with `npm run check` in `C:\Users\zhangxing\AppData\Local\Temp\input-kanban-final-merge`.
+
 ## v0.0.20
 
 ### Highlights

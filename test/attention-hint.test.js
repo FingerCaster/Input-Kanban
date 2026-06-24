@@ -50,6 +50,28 @@ test('worker context unauthorized logs surface an attention hint', async () => {
   assert.equal(state.batches[0].tasks[0].attentionHint.kind, 'worker_context_unauthorized');
 });
 
+test('patch context drift logs surface a running attention hint', async () => {
+  const startedAt = new Date().toISOString();
+  const { workerDir } = await writeRunState({ runId: 'run_patch_context_drift', startedAt });
+  await fsp.writeFile(path.join(workerDir, 'stderr.log'), 'ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines\n');
+
+  const state = await refreshRun('run_patch_context_drift');
+  assert.equal(state.tasks[0].status, 'running');
+  assert.equal(state.tasks[0].attentionHint.kind, 'patch_context_drift');
+  assert.match(state.tasks[0].attentionHint.message, /Patch 上下文不匹配/);
+});
+
+test('environment HTTP blockers surface a running attention hint', async () => {
+  const startedAt = new Date().toISOString();
+  const { workerDir } = await writeRunState({ runId: 'run_environment_blocked', startedAt });
+  await fsp.writeFile(path.join(workerDir, 'last_message.md'), 'Benchmark preflight stopped: HTTP 409 values profile unavailable for report 303.\n');
+
+  const state = await refreshRun('run_environment_blocked');
+  assert.equal(state.tasks[0].status, 'running');
+  assert.equal(state.tasks[0].attentionHint.kind, 'environment_blocked');
+  assert.match(state.tasks[0].attentionHint.message, /外部环境/);
+});
+
 test('tmux codex exec tasks do not show manual intervention hints for stale logs', async () => {
   const startedAt = new Date(Date.now() - 20 * 60 * 1000).toISOString();
   const { workerDir } = await writeRunState({ runId: 'run_stale_tmux_no_hint', startedAt });

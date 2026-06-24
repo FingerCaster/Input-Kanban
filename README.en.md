@@ -100,9 +100,11 @@ input-kanban retry <runId> [taskId]
 input-kanban stop <runId>
 ```
 
-### 6) If you are an Agent and can only call the CLI
+## Agent and Handoff Workflow
 
-Run:
+### CLI-only Agents
+
+If you are an Agent and can only call the CLI, run:
 
 ```bash
 input-kanban guide
@@ -116,13 +118,15 @@ input-kanban --help
 
 `guide` prints an agent-friendly control loop and ready-to-copy templates.
 
+### Install the `input-kanban-prepare` Skill
+
 To install the bundled `input-kanban-prepare` skill for Codex:
 
 ```bash
 input-kanban install-skill codex
 ```
 
-This skill is for turning an external Agent conversation into an execution-ready `task.md` for Input Kanban: it helps fill in `Goal`, `Acceptance Criteria`, `Expected Artifacts`, `Context References`, and `Risks`, and can suggest batches or parallelism when needed. It does not execute the task or decide final acceptance.
+This skill turns an external Agent conversation into an execution-ready `task.md` for Input Kanban: it helps fill in `Goal`, `Acceptance Criteria`, `Expected Artifacts`, `Context References`, and `Risks`, and can suggest batches or parallelism when needed. It does not execute the task or decide final acceptance.
 
 To specify the Codex skills root explicitly:
 
@@ -130,7 +134,7 @@ To specify the Codex skills root explicitly:
 input-kanban install-skill codex --target-dir ~/.codex/skills
 ```
 
-## Hand Off from an External Agent Conversation
+### Hand Off from an External Agent Conversation
 
 If the task was first discussed in Claude, Cursor, Codex, or another external Agent conversation, prepare a structured `task.md` before handing it to Input Kanban:
 
@@ -156,6 +160,7 @@ input-kanban submit --task-file task.md
 input-kanban submit --task-file task.md --plan-approval
 input-kanban submit --task-file task.md -d
 input-kanban install-skill codex
+input-kanban deps tmux
 input-kanban --json runs --active
 input-kanban --json status <runId>
 input-kanban --json result <runId>
@@ -180,6 +185,26 @@ Use tmux mode when you want to:
 - inspect the run process locally
 
 If you do not need terminal visibility, keep using the default `headless` runner.
+
+When creating a run in the Web UI, you can also choose a runner:
+
+- `Follow default`: use the local default runner
+- `headless`: force this run to use headless mode
+- `tmux`: force this run to use tmux mode
+
+The default runner is stored in the local config file `~/.input-kanban/config.json` and is shared by the CLI and Web UI. If `KANBAN_RUNNER` is set, the environment variable takes precedence.
+
+If you choose `tmux` in the Web UI but tmux is not detected, run creation is blocked and an install command is shown. The Web UI does not install system dependencies directly; run the command explicitly in a terminal:
+
+```bash
+input-kanban deps install tmux
+```
+
+The installer plan chooses a common package manager for the platform, such as winget/psmux on Windows, Homebrew on macOS, or apt/dnf/pacman/zypper/apk on Linux. On Windows, psmux is a third-party tmux-compatible implementation, not official tmux. You can also install another implementation manually as long as a working `tmux` command is available. The install path shows the command and requires confirmation before running; you can preview it first:
+
+```bash
+input-kanban deps install tmux --dry-run
+```
 
 ## Runtime Data Location
 
@@ -218,6 +243,7 @@ These files are local run records and do not need to be committed to your applic
 - Node.js 20 or newer
 - Codex CLI installed and available
 - `tmux` installed if you want `--runner tmux`
+- Use `input-kanban deps tmux` to check tmux status
 - The `codex` command works in your terminal, or `--codex-bin` points to the executable
 
 ## Maintainer Development

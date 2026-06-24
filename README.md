@@ -98,9 +98,11 @@ input-kanban retry <runId> [taskId]
 input-kanban stop <runId>
 ```
 
-### 6) 如果你是 Agent，只会调用 CLI
+## Agent 与 handoff 工作流
 
-直接运行：
+### CLI-only Agents
+
+如果你是只会调用 CLI 的 Agent，直接运行：
 
 ```bash
 input-kanban guide
@@ -113,6 +115,8 @@ input-kanban --help
 ```
 
 `guide` 会输出一个更适合 Agent 的操作循环和可直接复制的示例模板。
+
+### 安装 `input-kanban-prepare` skill
 
 如果你想把内置的 `input-kanban-prepare` skill 安装到 Codex：
 
@@ -128,7 +132,7 @@ input-kanban install-skill codex
 input-kanban install-skill codex --target-dir ~/.codex/skills
 ```
 
-## 从外部 Agent 对话交给看板执行
+### 外部 Agent 对话交给看板执行
 
 如果任务先在 Claude、Cursor、Codex 或其它外部 Agent 对话里讨论，建议先整理成结构化 `task.md`，再交给 Input Kanban：
 
@@ -154,6 +158,7 @@ input-kanban submit --task-file task.md
 input-kanban submit --task-file task.md --plan-approval
 input-kanban submit --task-file task.md -d
 input-kanban install-skill codex
+input-kanban deps tmux
 input-kanban --json runs --active
 input-kanban --json status <runId>
 input-kanban --json result <runId>
@@ -178,6 +183,26 @@ tmux 模式适合：
 - 想在本地排查执行过程
 
 如果你不需要终端可视化，就继续用默认的 `headless`。
+
+Web 新建任务批次时也可以选择 runner：
+
+- `跟随默认`：使用本机配置里的默认 runner
+- `headless`：当前批次强制使用 headless
+- `tmux`：当前批次强制使用 tmux
+
+默认 runner 会保存到本机配置文件 `~/.input-kanban/config.json`，CLI 和 Web 共用；如果设置了环境变量 `KANBAN_RUNNER`，环境变量优先。
+
+如果 Web 里选择 `tmux` 但本机没有检测到 tmux，会禁止创建批次并提示安装命令。Web 不会直接安装系统依赖；需要在终端里显式执行：
+
+```bash
+input-kanban deps install tmux
+```
+
+安装命令会按平台选择常见包管理器，例如 Windows 的 winget/psmux、macOS 的 Homebrew、Linux 的 apt/dnf/pacman/zypper/apk。Windows 上的 psmux 是第三方 tmux 兼容实现；也可以自行安装其他实现，只要当前环境里有可用的 `tmux` 命令即可。执行安装前会展示将运行的命令并要求确认；也可以先查看计划：
+
+```bash
+input-kanban deps install tmux --dry-run
+```
 
 ## 数据会存到哪里
 
@@ -216,6 +241,7 @@ runs/<runId>/
 - Node.js 20 或更高版本
 - 已安装并可用的 Codex CLI
 - 如果要用 `--runner tmux`，本机需要安装 `tmux`
+- 可用 `input-kanban deps tmux` 检查 tmux 状态
 - `codex` 命令在终端可用，或通过 `--codex-bin` 指定可执行文件
 
 ## 维护者开发

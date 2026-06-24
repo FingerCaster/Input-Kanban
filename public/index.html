@@ -54,7 +54,7 @@
     .pill { display: inline-block; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 800; background: var(--gray); line-height: 1.3; }
     .completed, .judged, .planned, .batches_completed { background: var(--green); }
     .running, .planning, .judging { background: var(--blue); }
-    .failed, .plan_failed, .judge_failed, .unknown, .batch_blocked { background: var(--red); }
+    .failed, .plan_failed, .judge_failed, .unknown, .batch_blocked, .load_failed { background: var(--red); }
     .plan_empty { background: var(--orange); }
     .pending, .created { background: var(--gray); }
     .batch-row td { border-top: 3px solid var(--line-strong); background: #101827; font-weight: 800; font-size: 14px; padding-top: 13px; }
@@ -137,6 +137,24 @@
     .codex-status { margin-top: 4px; color: var(--muted); font-size: 12px; }
     .codex-status.warning { color: #fbbf24; }
     .codex-status code { color: #bfdbfe; }
+    .footer-actions { margin-top: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; }
+    .environment-trigger { padding: 3px 8px; font-size: 12px; opacity: .72; }
+    .environment-trigger:hover { opacity: 1; }
+    .environment-row { display: grid; grid-template-columns: 140px minmax(0, 1fr); gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .environment-row:last-child { border-bottom: 0; }
+    .environment-label { color: var(--muted); font-size: 12px; font-weight: 800; }
+    .environment-value { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .environment-value select { max-width: 260px; }
+    .environment-status { color: #cbd5e1; font-size: 12px; }
+    .environment-status.warning { color: #fbbf24; }
+    .tmux-dependency-card { width: min(560px, 100%); }
+    .tmux-command-wrap { margin-top: 10px; }
+    .tmux-command-wrap.hidden { display: none; }
+    .tmux-dependency-notes { margin-top: 8px; white-space: pre-line; }
+    .tmux-dependency-notes.hidden { display: none; }
+    .install-command { margin: 6px 0 0; white-space: pre-wrap; word-break: break-word; }
+    .create-runner-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+    .create-runner-row button { margin-bottom: 0; white-space: nowrap; }
     .file-content-wrap { position: relative; }
     .floating-copy-btn { position: absolute; top: 8px; left: 8px; z-index: 2; opacity: 0; pointer-events: none; transition: opacity .15s; padding: 5px 8px; background: rgba(71,85,105,.92); }
     .file-content-wrap:hover .floating-copy-btn:not(.hidden), .floating-copy-btn:focus { opacity: 1; pointer-events: auto; }
@@ -153,7 +171,7 @@
     .modal-close-btn { padding: 3px 9px; font-size: 18px; line-height: 1; opacity: .72; }
     .modal-close-btn:hover { opacity: 1; }
     .page-footer { padding: 0 18px 18px; color: var(--muted); text-align: center; font-size: 12px; }
-    .session-management-trigger { margin-top: 8px; padding: 3px 8px; font-size: 12px; opacity: .72; }
+    .session-management-trigger { padding: 3px 8px; font-size: 12px; opacity: .72; }
     .session-management-trigger:hover { opacity: 1; }
     .session-management-tabs { display: flex; gap: 6px; margin: 8px 0 4px; flex-wrap: wrap; align-items: center; }
     .session-management-tab { padding: 5px 9px; font-size: 12px; background: var(--gray); }
@@ -206,6 +224,12 @@
       <label>批次名称</label><input id="label" value="codex-task" />
       <label>工作区</label><input id="repo" />
       <label>运行目录</label><input id="runsDir" readonly />
+      <label>Runner</label><div class="create-runner-row"><select id="runnerMode">
+        <option value="default" selected>跟随默认</option>
+        <option value="headless">headless</option>
+        <option value="tmux">tmux</option>
+      </select><button class="secondary" title="检查 tmux 状态" onclick="checkTmuxFromCreate()">检查</button></div>
+      <div id="runnerHint" class="muted">默认 runner 加载中...</div>
       <label>最大并发数</label><input id="maxParallel" type="number" value="3" min="1" max="16" />
       <label>Worker 沙箱</label><select id="workerSandbox">
         <option value="workspace-write" selected>workspace-write（默认，允许写当前工作区）</option>
@@ -252,7 +276,42 @@
     </section>
   </div>
 </main>
-<footer class="page-footer"><div id="pageFooter">版本：-</div><div id="codexStatus" class="codex-status hidden"></div><button id="sessionManagementTrigger" class="secondary session-management-trigger" onclick="openSessionManagement()">会话管理</button></footer>
+<footer class="page-footer"><div id="pageFooter">版本：-</div><div id="codexStatus" class="codex-status hidden"></div><div class="footer-actions"><button id="environmentTrigger" class="secondary environment-trigger" onclick="openEnvironmentModal()">环境</button><button id="sessionManagementTrigger" class="secondary session-management-trigger" onclick="openSessionManagement()">会话管理</button></div></footer>
+<div id="environmentModal" class="modal-backdrop hidden" onclick="closeEnvironmentModal(event)">
+  <div class="modal-card" onclick="event.stopPropagation()">
+    <div class="modal-title-row">
+      <h2>环境</h2>
+      <div class="modal-title-actions"><button class="secondary modal-close-btn" title="关闭" aria-label="关闭" onclick="closeEnvironmentModal()">×</button></div>
+    </div>
+    <div class="environment-row">
+      <div class="environment-label">默认 Runner</div>
+      <div class="environment-value"><select id="defaultRunnerSelect" onchange="saveDefaultRunner(this.value)"><option value="headless">headless</option><option value="tmux">tmux</option></select><span id="defaultRunnerStatus" class="environment-status"></span></div>
+    </div>
+    <div class="environment-row">
+      <div class="environment-label">tmux</div>
+      <div class="environment-value"><span id="tmuxStatus" class="environment-status">尚未检测</span><button class="secondary" onclick="refreshTmuxStatus()">重新检测</button><button id="copyTmuxInstallCommandBtn" class="secondary hidden" onclick="copyTmuxInstallCommand(event)">复制安装指引</button></div>
+    </div>
+  </div>
+</div>
+<div id="tmuxDependencyModal" class="modal-backdrop hidden" onclick="closeTmuxDependencyModal(event)">
+  <div class="modal-card tmux-dependency-card" onclick="event.stopPropagation()">
+    <div class="modal-title-row">
+      <h2 id="tmuxDependencyTitle">tmux 未安装</h2>
+      <div class="modal-title-actions"><button class="secondary modal-close-btn" title="关闭" aria-label="关闭" onclick="closeTmuxDependencyModal()">×</button></div>
+    </div>
+    <div id="tmuxDependencyMessage" class="notice warning"></div>
+    <div id="tmuxDependencyNotes" class="muted tmux-dependency-notes hidden"></div>
+    <div id="tmuxDependencyCommandWrap" class="tmux-command-wrap hidden">
+      <label id="tmuxDependencyCommandLabel">安装命令</label>
+      <pre id="tmuxDependencyCommand" class="install-command"></pre>
+    </div>
+    <div class="toolbar">
+      <button id="showTmuxInstallCommandBtn" onclick="showTmuxInstallCommand()">查看安装命令</button>
+      <button id="copyTmuxDependencyCommandBtn" class="secondary hidden" onclick="copyTmuxDependencyCommand(event)">复制安装命令</button>
+      <button class="secondary" onclick="closeTmuxDependencyModal()">关闭</button>
+    </div>
+  </div>
+</div>
 <div id="sessionManagementModal" class="modal-backdrop hidden" onclick="closeSessionManagement(event)">
   <div id="sessionManagementModalCard" class="modal-card" onclick="event.stopPropagation()">
     <div class="modal-title-row">
@@ -311,6 +370,10 @@ const WORKER_SANDBOX_STORAGE_KEY = 'input-kanban.workerSandbox';
 const VALID_WORKER_SANDBOXES = new Set(['read-only', 'workspace-write', 'danger-full-access']);
 let currentWorkspacePath = '';
 let selectedWorkspaceFilter = localStorage.getItem('input-kanban.workspaceFilter') || WORKSPACE_FILTER_ALL;
+let appConfigState = { effectiveRunner: 'headless', runnerEnvOverride: false, defaultRunner: 'headless', loaded: false };
+let appConfigLoadPromise = null;
+let tmuxDependencyState = null;
+let tmuxDependencyModalState = { tmux: null, guidance: '', revealed: false };
 
 async function api(path, opts={}) {
   const res = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts });
@@ -339,7 +402,8 @@ const statusText = {
   created: '已创建', pending: '等待中', planning: '拆分中', planned: '已拆分',
   running: '执行中', completed: '已完成', failed: '失败', unknown: '未知',
   batches_completed: '批次完成', batch_blocked: '批次阻塞', plan_empty: '拆分为空', stopped: '已停止',
-  judging: '验收中', judged: '已验收', plan_failed: '拆分失败', judge_failed: '验收失败'
+  judging: '验收中', judged: '已验收', plan_failed: '拆分失败', judge_failed: '验收失败',
+  load_failed: '读取失败'
 };
 const roleText = { planner: '任务拆分', judge: '汇总验收' };
 function displayStatus(s) { return statusText[s] || s || '-'; }
@@ -367,7 +431,7 @@ function maxIsoTime(values) {
 }
 function runDurationEnd(s) {
   if (!s) return null;
-  const terminalStatuses = new Set(['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped']);
+  const terminalStatuses = new Set(['judged', 'judge_failed', 'batch_blocked', 'plan_failed', 'plan_empty', 'stopped', 'load_failed']);
   if (!terminalStatuses.has(s.status)) return null;
   return maxIsoTime([
     s.stoppedAt,
@@ -410,9 +474,7 @@ function tmuxSessionName(state = currentState) {
 }
 function hasRunTmuxMetadata(state = currentState) {
   if (!state || state.runner !== 'tmux') return false;
-  if (state.tmux?.hasTmuxSession || state.tmux?.tmuxSessionName || state.tmux?.tmuxAttachCommand) return true;
-  const roles = [state.planner, ...(state.tasks || []), state.judge];
-  return roles.some(role => role?.tmux?.ready === true && (role.tmux.sessionName || role.tmux.windowName || role.tmux.target));
+  return !!(state.tmux?.hasTmuxSession && (state.tmux?.tmuxSessionName || state.tmux?.tmuxAttachCommand));
 }
 function runAttachCommand(state = currentState) {
   if (!hasRunTmuxMetadata(state)) return '';
@@ -424,6 +486,7 @@ function runCardDurationEnd(run) {
   return run.durationEnd || null;
 }
 function runCardDurationText(run) {
+  if (!run?.createdAt) return '-';
   return formatDurationMs(durationSeconds(run.createdAt, runCardDurationEnd(run)) * 1000);
 }
 function runListHasTmuxMetadata(run) {
@@ -431,7 +494,7 @@ function runListHasTmuxMetadata(run) {
   if (selectedRun === run.runId && currentState?.runId === run.runId) return hasRunTmuxMetadata(currentState);
   const cached = statusByRunId.get(run.runId);
   if (cached) return hasRunTmuxMetadata(cached);
-  return !!(run?.tmux?.hasTmuxSession || run?.tmux?.tmuxSessionName || run?.tmux?.tmuxAttachCommand);
+  return !!(run?.tmux?.hasTmuxSession && (run?.tmux?.tmuxSessionName || run?.tmux?.tmuxAttachCommand));
 }
 
 async function loadHealth() {
@@ -462,6 +525,226 @@ async function loadCodexStatus() {
     el.innerHTML = `Codex:检测失败|${esc(errorDetail(error))}`;
   }
 }
+function renderRunnerControls() {
+  const hint = document.getElementById('runnerHint');
+  const defaultSelect = document.getElementById('defaultRunnerSelect');
+  const defaultStatus = document.getElementById('defaultRunnerStatus');
+  const effective = appConfigState.effectiveRunner || 'headless';
+  if (hint) hint.textContent = appConfigState.loaded ? `默认 runner: ${effective}${appConfigState.runnerEnvOverride ? '（环境变量覆盖）' : ''}` : '默认 runner 加载中...';
+  if (defaultSelect) {
+    defaultSelect.value = appConfigState.defaultRunner || effective;
+    defaultSelect.disabled = !appConfigState.loaded || !!appConfigState.runnerEnvOverride;
+  }
+  if (defaultStatus) defaultStatus.textContent = !appConfigState.loaded ? '正在加载...' : appConfigState.runnerEnvOverride ? 'KANBAN_RUNNER 正在覆盖本地配置' : `当前生效: ${effective}`;
+}
+async function loadAppConfig({ force = false } = {}) {
+  if (!force && appConfigState.loaded) return appConfigState;
+  if (!force && appConfigLoadPromise) return appConfigLoadPromise;
+  appConfigLoadPromise = (async () => {
+    const data = await api('/api/config');
+    appConfigState = {
+      defaultRunner: data.config?.defaultRunner || 'headless',
+      effectiveRunner: data.effective?.runner || 'headless',
+      runnerEnvOverride: !!data.effective?.runnerEnvOverride,
+      loaded: true
+    };
+    renderRunnerControls();
+    return appConfigState;
+  })();
+  try {
+    return await appConfigLoadPromise;
+  } finally {
+    appConfigLoadPromise = null;
+  }
+}
+async function ensureAppConfigLoaded() {
+  if (appConfigState.loaded) return true;
+  try {
+    await loadAppConfig();
+    return true;
+  } catch (error) {
+    alert(`Runner 配置加载失败：${errorDetail(error)}`);
+    renderRunnerControls();
+    return false;
+  }
+}
+function renderTmuxStatus() {
+  const el = document.getElementById('tmuxStatus');
+  const copyButton = document.getElementById('copyTmuxInstallCommandBtn');
+  if (!el) return;
+  const tmux = tmuxDependencyState;
+  el.classList.toggle('warning', !!tmux && !tmux.installed);
+  if (!tmux) {
+    el.textContent = '尚未检测';
+    copyButton?.classList.add('hidden');
+    return;
+  }
+  if (tmux.installed) {
+    el.textContent = tmux.version || '已安装';
+    copyButton?.classList.add('hidden');
+    return;
+  }
+  const guidance = tmuxInstallGuidance(tmux);
+  el.textContent = tmux.installAvailable ? `未安装｜${tmux.cliInstallCommand}` : `未安装｜${tmuxManualInstallSummary(tmux)}`;
+  if (copyButton) {
+    copyButton.textContent = tmux.installAvailable ? '复制安装命令' : '复制安装指引';
+    copyButton.classList.toggle('hidden', !guidance);
+  }
+}
+async function refreshTmuxStatus() {
+  const data = await api('/api/tmux');
+  tmuxDependencyState = data.tmux;
+  renderTmuxStatus();
+  return tmuxDependencyState;
+}
+async function saveDefaultRunner(value) {
+  if (appConfigState.runnerEnvOverride) {
+    alert('KANBAN_RUNNER 正在覆盖本地配置，请先移除环境变量后再修改。');
+    renderRunnerControls();
+    return;
+  }
+  const data = await api('/api/config', { method: 'PATCH', body: JSON.stringify({ defaultRunner: value }) });
+  appConfigState = {
+    defaultRunner: data.config?.defaultRunner || 'headless',
+    effectiveRunner: data.effective?.runner || value,
+    runnerEnvOverride: !!data.effective?.runnerEnvOverride,
+    loaded: true
+  };
+  renderRunnerControls();
+}
+function openEnvironmentModal() {
+  document.getElementById('environmentModal').classList.remove('hidden');
+  loadAppConfig({ force: true }).catch(console.error);
+  refreshTmuxStatus().catch(console.error);
+}
+function closeEnvironmentModal(event) {
+  if (event?.target && event.target.id !== 'environmentModal') return;
+  document.getElementById('environmentModal').classList.add('hidden');
+}
+function selectedRunnerMode() {
+  const value = selectedRunnerOption();
+  return value === 'default' ? (appConfigState.effectiveRunner || 'headless') : value;
+}
+function selectedRunnerOption() {
+  return document.getElementById('runnerMode')?.value || 'default';
+}
+async function ensureRunnerSelectionReady() {
+  if (selectedRunnerOption() !== 'default') return true;
+  return await ensureAppConfigLoaded();
+}
+function tmuxInstallNotes(tmux = tmuxDependencyState) {
+  return tmux?.installNotes || tmux?.installPlan?.notes || [];
+}
+function tmuxManualInstallSummary(tmux = tmuxDependencyState) {
+  const notes = tmuxInstallNotes(tmux);
+  return notes[0] || tmux?.installHint || '未找到自动安装器';
+}
+function tmuxInstallGuidance(tmux = tmuxDependencyState) {
+  if (!tmux) return '';
+  if (tmux.installAvailable && tmux.cliInstallCommand) return tmux.cliInstallCommand;
+  return tmuxInstallNotes(tmux).join('\n') || tmux.installHint || '';
+}
+function tmuxInstallActionLabel(tmux = tmuxDependencyState) {
+  return tmux?.installAvailable ? '安装命令' : '安装指引';
+}
+function renderTmuxDependencyModal() {
+  const tmux = tmuxDependencyModalState.tmux || tmuxDependencyState;
+  const installed = !!tmux?.installed;
+  const guidance = tmuxDependencyModalState.guidance || tmuxInstallGuidance(tmux) || 'input-kanban deps install tmux';
+  const actionLabel = tmuxInstallActionLabel(tmux);
+  const title = document.getElementById('tmuxDependencyTitle');
+  const message = document.getElementById('tmuxDependencyMessage');
+  const commandWrap = document.getElementById('tmuxDependencyCommandWrap');
+  const commandLabel = document.getElementById('tmuxDependencyCommandLabel');
+  const command = document.getElementById('tmuxDependencyCommand');
+  const notesEl = document.getElementById('tmuxDependencyNotes');
+  const showButton = document.getElementById('showTmuxInstallCommandBtn');
+  const copyButton = document.getElementById('copyTmuxDependencyCommandBtn');
+  const notes = installed ? '' : tmuxInstallNotes(tmux).join('\n');
+  if (title) title.textContent = installed ? 'tmux 可用' : 'tmux 未安装';
+  if (message) {
+    message.classList.toggle('warning', !installed);
+    message.textContent = installed
+      ? `tmux 可用: ${tmux.version || tmux.tmuxBin || '已安装'}`
+      : `tmux 未安装，不能创建 tmux runner 批次。选择查看${actionLabel}后，在终端中执行对应命令；也可以关闭后改用 headless。`;
+  }
+  if (commandLabel) commandLabel.textContent = actionLabel;
+  if (command) command.textContent = guidance;
+  if (notesEl) {
+    notesEl.textContent = notes;
+    notesEl.classList.toggle('hidden', !notes);
+  }
+  commandWrap?.classList.toggle('hidden', installed || !tmuxDependencyModalState.revealed);
+  if (showButton) {
+    showButton.textContent = `查看${actionLabel}`;
+    showButton.classList.toggle('hidden', installed || tmuxDependencyModalState.revealed);
+  }
+  if (copyButton) {
+    copyButton.textContent = `复制${actionLabel}`;
+    copyButton.classList.toggle('hidden', installed || !tmuxDependencyModalState.revealed);
+  }
+}
+function openTmuxDependencyModal(tmux, { revealed = false } = {}) {
+  tmuxDependencyState = tmux || tmuxDependencyState;
+  tmuxDependencyModalState = {
+    tmux: tmuxDependencyState,
+    guidance: tmuxInstallGuidance(tmuxDependencyState) || 'input-kanban deps install tmux',
+    revealed
+  };
+  renderTmuxStatus();
+  renderTmuxDependencyModal();
+  document.getElementById('tmuxDependencyModal')?.classList.remove('hidden');
+}
+function closeTmuxDependencyModal(event) {
+  if (event?.target && event.target.id !== 'tmuxDependencyModal') return;
+  document.getElementById('tmuxDependencyModal')?.classList.add('hidden');
+}
+function showTmuxInstallCommand() {
+  tmuxDependencyModalState.revealed = true;
+  renderTmuxDependencyModal();
+}
+async function copyTmuxDependencyCommand(event) {
+  const command = tmuxDependencyModalState.guidance || tmuxInstallGuidance() || 'input-kanban deps install tmux';
+  try {
+    await navigator.clipboard.writeText(command);
+    if (event?.currentTarget) {
+      const label = event.currentTarget.textContent;
+      event.currentTarget.textContent = '已复制';
+      setTimeout(() => { event.currentTarget.textContent = label; }, 900);
+    }
+  } catch {
+    tmuxDependencyModalState.revealed = true;
+    renderTmuxDependencyModal();
+    if (event?.currentTarget) event.currentTarget.textContent = '请手动复制';
+  }
+}
+async function copyTmuxInstallCommand(event) {
+  const command = tmuxInstallGuidance() || 'input-kanban deps install tmux';
+  try {
+    await navigator.clipboard.writeText(command);
+    if (event?.currentTarget) {
+      event.currentTarget.textContent = '已复制';
+      setTimeout(() => { event.currentTarget.textContent = tmuxDependencyState?.installAvailable ? '复制安装命令' : '复制安装指引'; }, 900);
+    }
+  } catch {
+    openTmuxDependencyModal(tmuxDependencyState, { revealed: true });
+  }
+}
+function showTmuxInstallPrompt(tmux) {
+  openTmuxDependencyModal(tmux, { revealed: false });
+}
+async function ensureTmuxForCreate() {
+  if (selectedRunnerMode() !== 'tmux') return true;
+  const tmux = await refreshTmuxStatus();
+  if (tmux?.installed) return true;
+  showTmuxInstallPrompt(tmux);
+  return false;
+}
+async function checkTmuxFromCreate() {
+  const tmux = await refreshTmuxStatus();
+  if (tmux?.installed) openTmuxDependencyModal(tmux);
+  else showTmuxInstallPrompt(tmux);
+}
 function showCreateForm() {
   selectedRun = null; selectedTask = null; selectedFileName = null; currentState = null;
   clearFileView();
@@ -488,7 +771,9 @@ function initializeWorkerSandboxPreference() {
 }
 async function createRun() {
   saveWorkerSandboxPreference();
-  const body = { label: label.value, workspace: repo.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, codexSkipGitRepoCheck: codexSkipGitRepoCheck.checked, planApproval: planApproval.checked, taskText: taskText.value };
+  if (!await ensureRunnerSelectionReady()) return;
+  if (!await ensureTmuxForCreate()) return;
+  const body = { label: label.value, workspace: repo.value, repo: repo.value, maxParallel: maxParallel.value, workerSandbox: workerSandbox.value, codexSkipGitRepoCheck: !!document.getElementById('codexSkipGitRepoCheck')?.checked, planApproval: planApproval.checked, taskText: taskText.value, runner: selectedRunnerMode() };
   const r = await api('/api/runs', { method: 'POST', body: JSON.stringify(body) });
   selectedRun = r.runId; selectedTask = null; selectedFileName = null;
   clearFileView();
@@ -937,6 +1222,12 @@ function updateRunNotice() {
     el.textContent = '';
     return;
   }
+  const attentionTasks = (currentState.tasks || []).filter(t => t.attentionHint?.message);
+  if (attentionTasks.length) {
+    el.classList.remove('hidden');
+    el.textContent = `执行中预警:${attentionTasks.map(t => `${t.id} ${t.attentionHint.message}`).join('；')} 可在任务行复制 Codex resume 命令介入。`;
+    return;
+  }
   const error = currentState.planner?.planParseError;
   if (currentState.status === 'plan_empty') {
     el.classList.remove('hidden');
@@ -999,10 +1290,15 @@ function taskDurationCell(t) {
 function processExitCell(t) {
   return `${esc(t?.pid || '-')} / ${esc(t?.exitCode ?? '-')}`;
 }
+function taskSessionId(t) {
+  return t?.codexThread?.sessionId || t?.codexThread?.id || '';
+}
 function taskAttentionHintCell(t) {
   if (!t?.attentionHint?.message) return '';
   const severity = t.attentionHint.severity === 'blocked' ? 'failed' : 'secondary';
-  return `<span class="pill ${severity}" title="${esc(t.attentionHint.message)}">${esc(t.attentionHint.message)}</span>`;
+  const sessionId = taskSessionId(t);
+  const resumeButton = sessionId ? `<button class="secondary copy-btn" title="复制 Codex resume 命令" onclick='copyResumeCommand(event, ${JSON.stringify(sessionId)})'>resume</button>` : '';
+  return `<span class="pill ${severity}" title="${esc(t.attentionHint.message)}">${esc(t.attentionHint.message)}</span>${resumeButton}`;
 }
 function taskActionInfoCell(id, t) {
   return `<div class="row-actions">${taskAttentionHintCell(t)}${taskActionCell(id, t)}</div>`;
@@ -1299,6 +1595,17 @@ async function copySessionId(event, thread) {
     prompt('复制 Codex 会话ID', thread);
   }
 }
+async function copyResumeCommand(event, sessionId) {
+  event.stopPropagation();
+  const command = `codex exec resume ${sessionId}`;
+  try {
+    await navigator.clipboard.writeText(command);
+    event.currentTarget.textContent = '✓';
+    setTimeout(() => { event.currentTarget.textContent = 'resume'; }, 900);
+  } catch {
+    prompt('复制 Codex resume 命令', command);
+  }
+}
 function labelForRun(runId) {
   if (currentState?.runId === runId) return currentState.label || '';
   return (latestRuns.find(run => run.runId === runId)?.label) || '';
@@ -1412,6 +1719,7 @@ initializeWorkerSandboxPreference();
 initSessionManagementResize();
 renderActionToolbar();
 loadCodexStatus().catch(console.error);
+loadAppConfig().catch(console.error);
 loadHealth().then(refreshRuns);
 setInterval(() => { if (selectedRun) refreshSelected({auto:true}).catch(console.error); else refreshRuns().catch(console.error); }, AUTO_REFRESH_MS);
 </script>

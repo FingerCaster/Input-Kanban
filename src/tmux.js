@@ -77,10 +77,12 @@ export function sanitizeTmuxWindowName(value, options = {}) {
 export async function checkTmuxAvailable(options = {}) {
   const tmuxBin = options.tmuxBin || DEFAULT_TMUX_BIN;
   const result = await runCommand(tmuxBin, ['-V'], options);
+  const version = result.code === 0 ? result.stdout.trim() : '';
+  const available = result.code === 0 && /^(tmux|psmux)\b/i.test(version);
   return {
-    available: result.code === 0,
+    available,
     tmuxBin,
-    version: result.code === 0 ? result.stdout.trim() : '',
+    version: available ? version : '',
     result
   };
 }

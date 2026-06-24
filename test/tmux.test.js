@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   TmuxUnavailableError,
+  checkTmuxAvailable,
   ensureTmuxAvailable,
   sanitizeTmuxName,
   sanitizeTmuxSessionName,
@@ -17,6 +18,7 @@ import {
   tmuxSelectLayout,
   tmuxSplitWindow
 } from '../src/tmux.js';
+import { shellWord } from '../src/deps.js';
 import { createDefaultRunner, createHeadlessRunner, createTmuxRunner, headlessRunner } from '../src/runners/index.js';
 
 function makeRunner(handler) {
@@ -40,6 +42,10 @@ test('sanitizes tmux names deterministically with shell-safe characters', () => 
   assert.ok(longName.length <= 32);
 });
 
+test('shellWord quotes single quotes for POSIX shells', () => {
+  assert.equal(shellWord("it's"), "'it'\\''s'");
+});
+
 test('ensureTmuxAvailable returns a clear error when tmux cannot run', async () => {
   const { runner } = makeRunner(() => ({ code: 127, stderr: 'tmux: command not found' }));
 
@@ -49,6 +55,25 @@ test('ensureTmuxAvailable returns a clear error when tmux cannot run', async () 
       /tmux is unavailable/.test(error.message) &&
       /missing-tmux -V/.test(error.message)
   );
+});
+
+test('checkTmuxAvailable rejects non-tmux binaries that return success', async () => {
+  const { runner } = makeRunner(() => ({ code: 0, stdout: 'PowerShell 7.6.1\n' }));
+
+  const status = await checkTmuxAvailable({ tmuxBin: 'pwsh', runner });
+
+  assert.equal(status.available, false);
+  assert.equal(status.version, '');
+  assert.match(status.result.stdout, /PowerShell/);
+});
+
+test('checkTmuxAvailable accepts psmux tmux-compatible version output', async () => {
+  const { runner } = makeRunner(() => ({ code: 0, stdout: 'psmux 3.3.6\n' }));
+
+  const status = await checkTmuxAvailable({ tmuxBin: 'tmux', runner });
+
+  assert.equal(status.available, true);
+  assert.equal(status.version, 'psmux 3.3.6');
 });
 
 test('tmuxHasSession checks availability before checking the session', async () => {
