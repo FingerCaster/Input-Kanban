@@ -272,7 +272,7 @@ npm run check
 
 ## More Documentation
 
-- [Project guide](PROJECT_GUIDE.md)
+- [Project guide](docs/PROJECT_GUIDE.md)
 - [Environment variables](ENVIRONMENT.md)
 - [Agent CLI README](docs/input-kanban-cli-README.md)
 - [Agent CLI Skill draft](docs/input-kanban-cli-skill.md)

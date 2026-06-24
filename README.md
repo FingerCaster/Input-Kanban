@@ -270,7 +270,7 @@ npm run check
 
 ## 更多文档
 
-- [项目实现说明](PROJECT_GUIDE.md)
+- [项目实现说明](docs/PROJECT_GUIDE.md)
 - [环境变量](ENVIRONMENT.md)
 - [Agent CLI 说明](docs/input-kanban-cli-README.md)
 - [Agent CLI Skill 草稿](docs/input-kanban-cli-skill.md)

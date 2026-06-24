@@ -405,7 +405,7 @@ src/appServerClient.js    Codex App Server stdio client and session lookup
 src/utils.js              paths, IDs, atomic JSON writes, file info, JSON extraction
 public/index.html         single-file frontend, no build step
 README.md                 user-facing overview
-PROJECT_GUIDE.md          implementation guide for humans and agents
+docs/PROJECT_GUIDE.md     implementation guide for humans and agents
 ENVIRONMENT.md            runtime environment variable reference
 ```
 
@@ -520,7 +520,7 @@ notes or handoff.
 
 3. Package dry run:
    - Run `npm pack --dry-run`.
-   - Verify the package includes `bin/`, `src/`, `public/`, `README.md`, `README.en.md`, `PROJECT_GUIDE.md`, `ENVIRONMENT.md`, and `package.json`.
+   - Verify the package includes `bin/`, `src/`, `public/`, `README.md`, `README.en.md`, `docs/PROJECT_GUIDE.md`, `ENVIRONMENT.md`, and `package.json`.
    - Verify no runtime run directories, local logs, or unrelated temporary artifacts are included.
 
 ## Release Notes
